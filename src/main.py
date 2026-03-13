@@ -2,7 +2,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from src.api.routes.alerts import alerts_router
 from src.api.routes.health import health_router
+from src.api.routes.metrics import metrics_router
+from src.api.routes.watchlist import watchlist_router
 
 
 @asynccontextmanager
@@ -27,4 +30,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Mantle Monitor", lifespan=lifespan)
     app.include_router(health_router)
+    app.include_router(alerts_router)
+    app.include_router(metrics_router)
+    app.include_router(watchlist_router)
     return app
