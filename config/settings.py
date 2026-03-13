@@ -1,0 +1,20 @@
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    database_url: str
+    dune_api_key: str = ""
+    coingecko_api_key: str = ""
+    dune_daily_active_users_query_id: int = 0
+    dune_active_addresses_query_id: int = 0
+    dune_chain_transactions_query_id: int = 0
+    dune_stablecoin_volume_query_id: int = 0
+    dune_dex_volume_query_id: int = 0
+    ai_enrichment_enabled: bool = False
+    lark_delivery_enabled: bool = False
+    scheduler_enabled: bool = True
+    host: str = "0.0.0.0"
+    port: int = 8000
+    log_level: str = "info"
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
