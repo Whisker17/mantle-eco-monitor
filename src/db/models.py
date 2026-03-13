@@ -1,9 +1,37 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Index, Integer, Numeric, Text
+import json
+
+from sqlalchemy import Boolean, DateTime, Index, Integer, Numeric, Text, TypeDecorator
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class StringList(TypeDecorator):
+    """ARRAY(Text) on Postgres, JSON-encoded TEXT on other dialects."""
+
+    impl = Text
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(ARRAY(Text))
+        return dialect.type_descriptor(Text)
+
+    def process_bind_param(self, value, dialect):
+        if dialect.name == "postgresql":
+            return value
+        if value is not None:
+            return json.dumps(value)
+        return value
+
+    def process_result_value(self, value, dialect):
+        if dialect.name == "postgresql":
+            return value
+        if value is not None:
+            return json.loads(value)
+        return value
 
 
 class Base(DeclarativeBase):
@@ -79,7 +107,7 @@ class WatchlistProtocol(Base):
     category: Mapped[str] = mapped_column(Text, nullable=False)
     monitoring_tier: Mapped[str] = mapped_column(Text, nullable=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    metrics: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    metrics: Mapped[list[str]] = mapped_column(StringList, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default="now()"
