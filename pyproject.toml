@@ -32,6 +32,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "live: hits public provider endpoints; skipped unless RUN_LIVE_SOURCE_TESTS=1",
+    "live_dune: hits live Dune query endpoint; skipped unless RUN_LIVE_DUNE_TESTS=1",
 ]
 
 [tool.setuptools.packages.find]

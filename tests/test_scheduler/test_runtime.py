@@ -262,3 +262,48 @@ async def test_run_collection_job_only_evaluates_latest_inserted_snapshot_per_me
 
     assert result.records_collected == 3
     assert result.alerts_created == 3
+
+
+@pytest.mark.asyncio
+async def test_run_collection_job_persists_dune_stablecoin_transfer_volume(session_factory):
+    now = datetime.now(tz=timezone.utc)
+    collector = FakeCollector(
+        source_platform="dune",
+        records=[
+            MetricRecord(
+                scope="core",
+                entity="mantle",
+                metric_name="stablecoin_transfer_volume",
+                value=Decimal("2500000"),
+                unit="usd",
+                source_platform="dune",
+                source_ref=None,
+                collected_at=now,
+            )
+        ],
+    )
+
+    result = await run_collection_job("core_dune", collector, session_factory)
+
+    assert result.status == "success"
+    assert result.records_collected == 1
+
+    async with session_factory() as session:
+        snapshots = (
+            await session.execute(
+                select(MetricSnapshot).where(
+                    MetricSnapshot.metric_name == "stablecoin_transfer_volume"
+                )
+            )
+        ).scalars().all()
+        runs = (
+            await session.execute(
+                select(SourceRun).where(SourceRun.job_name == "core_dune")
+            )
+        ).scalars().all()
+
+    assert len(snapshots) == 1
+    assert snapshots[0].value == Decimal("2500000")
+    assert len(runs) == 1
+    assert runs[0].source_platform == "dune"
+    assert runs[0].status == "success"

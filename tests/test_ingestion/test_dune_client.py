@@ -96,3 +96,41 @@ async def test_dune_client_health_check_requires_success_status():
     )
 
     assert await client.health_check() is False
+
+
+@pytest.mark.asyncio
+async def test_dune_collector_collects_stablecoin_transfer_volume_when_configured():
+    client = FakeDuneClient(
+        results={
+            42: [
+                {"day": "2026-03-13", "value": 1234567.89},
+            ]
+        }
+    )
+
+    class FakeSettings:
+        dune_stablecoin_volume_query_id = 42
+
+    collector = DuneCollector(client, FakeSettings())
+
+    records = await collector.collect()
+
+    assert len(records) == 1
+    assert records[0].metric_name == "stablecoin_transfer_volume"
+    assert records[0].value == Decimal("1234567.89")
+    assert records[0].unit == "usd"
+    assert records[0].entity == "mantle"
+
+
+@pytest.mark.asyncio
+async def test_dune_collector_skips_stablecoin_transfer_volume_when_query_id_missing():
+    client = FakeDuneClient(results={})
+
+    class FakeSettings:
+        dune_stablecoin_volume_query_id = 0
+
+    collector = DuneCollector(client, FakeSettings())
+
+    records = await collector.collect()
+
+    assert records == []
