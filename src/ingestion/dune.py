@@ -55,6 +55,20 @@ class DuneClient:
             return False
 
 
+def _parse_dune_datetime(day_raw: str) -> datetime:
+    normalized = day_raw.strip()
+    if normalized.endswith(" UTC"):
+        normalized = normalized.removesuffix(" UTC") + "+00:00"
+        normalized = normalized.replace(" ", "T", 1)
+    else:
+        normalized = normalized.replace("Z", "+00:00")
+
+    collected_at = datetime.fromisoformat(normalized)
+    if collected_at.tzinfo is None:
+        collected_at = collected_at.replace(tzinfo=timezone.utc)
+    return collected_at
+
+
 class DuneCollector(BaseCollector):
     def __init__(self, client: DuneClient, settings: Settings | None = None):
         self._client = client
@@ -76,9 +90,7 @@ class DuneCollector(BaseCollector):
             if day_raw is None:
                 continue
             if isinstance(day_raw, str):
-                collected_at = datetime.fromisoformat(day_raw.replace("Z", "+00:00"))
-                if collected_at.tzinfo is None:
-                    collected_at = collected_at.replace(tzinfo=timezone.utc)
+                collected_at = _parse_dune_datetime(day_raw)
             else:
                 collected_at = day_raw
 

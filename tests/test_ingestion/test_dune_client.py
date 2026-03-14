@@ -68,6 +68,19 @@ def test_dune_collector_skips_rows_without_day(fake_dune_client):
     assert len(records) == 0
 
 
+def test_dune_collector_parses_utc_timestamp_strings(fake_dune_client):
+    collector = DuneCollector(fake_dune_client)
+
+    records = collector._map_rows(
+        metric_name="stablecoin_transfer_volume",
+        rows=[{"day": "2026-03-14 00:00:00.000 UTC", "value": 123.45}],
+    )
+
+    assert len(records) == 1
+    assert records[0].metric_name == "stablecoin_transfer_volume"
+    assert records[0].unit == "usd"
+
+
 def test_dune_collector_source_platform(fake_dune_client):
     collector = DuneCollector(fake_dune_client)
     assert collector.source_platform == "dune"
