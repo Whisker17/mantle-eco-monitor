@@ -3,6 +3,7 @@ from config.settings import Settings
 
 def test_settings_load_public_source_first_dune_query_id():
     settings = Settings(
+        _env_file=None,
         database_url="postgresql+asyncpg://x:y@localhost:5432/mantle_monitor",
         dune_api_key="token",
         dune_stablecoin_volume_query_id=4,
@@ -16,8 +17,31 @@ def test_settings_load_public_source_first_dune_query_id():
     assert "dune_dex_volume_query_id" not in settings.model_fields
 
 
+def test_settings_ignores_legacy_dune_env_keys(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "DATABASE_URL=postgresql+asyncpg://x:y@localhost:5432/mantle_monitor",
+                "DUNE_DAILY_ACTIVE_USERS_QUERY_ID=1",
+                "DUNE_ACTIVE_ADDRESSES_QUERY_ID=2",
+                "DUNE_CHAIN_TRANSACTIONS_QUERY_ID=3",
+                "DUNE_DEX_VOLUME_QUERY_ID=5",
+                "DUNE_STABLECOIN_VOLUME_QUERY_ID=4",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    settings = Settings(_env_file=env_file)
+
+    assert settings.database_url == "postgresql+asyncpg://x:y@localhost:5432/mantle_monitor"
+    assert settings.dune_stablecoin_volume_query_id == 4
+
+
 def test_settings_defaults():
     settings = Settings(
+        _env_file=None,
         database_url="postgresql+asyncpg://x:y@localhost:5432/mantle_monitor",
     )
 
