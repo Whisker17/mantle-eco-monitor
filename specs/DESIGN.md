@@ -128,7 +128,7 @@ sequenceDiagram
 
 ### 3.0 Source Priority Policy
 
-This project uses a Dune-first source strategy.
+This project uses a public-source-first strategy.
 
 Approved source set for Phase 1:
 
@@ -140,12 +140,14 @@ Approved source set for Phase 1:
 
 Source selection rule:
 
-- If a metric can be sourced from Dune in a clean and maintainable way, use Dune as the primary source.
-- If Dune is not a good fit, use the most appropriate specialized source:
-  - DefiLlama for TVL, stablecoins, and ecosystem protocol data
+- Prefer public, unauthenticated endpoints first when the metric semantics remain acceptable.
+- Use the most appropriate specialized public source:
+  - DefiLlama for TVL, stablecoins, chain DEX volume, and ecosystem protocol data
   - L2Beat for Total Value Secured
-  - CoinGecko for MNT volume and market cap
-  - Growthepie only as a fallback for selected activity metrics
+  - Growthepie for Mantle activity metrics
+  - CoinGecko for MNT volume, and as a reference source for MNT market cap
+- Keep Dune only for metrics that the public source set does not cover cleanly, especially stablecoin transfer volume.
+- Phase 1 product assumption: treat Growthepie `daa` as acceptable for both `daily_active_users` and `active_addresses`.
 
 Artemis and Nansen are out of scope for this implementation plan and should not be included in Phase 1.
 
@@ -153,34 +155,34 @@ Artemis and Nansen are out of scope for this implementation plan and should not 
 
 | # | Metric | Primary Source | API Endpoint | Fallback Source | Notes |
 |---|--------|---------------|-------------|-----------------|-------|
-| 1 | TVL | DefiLlama | `GET /v2/historicalChainTvl/Mantle` | L2Beat | Free endpoint; returns daily TVL array |
-| 2 | Total Value Secured | L2Beat | `GET /api/scaling/tvl/mantle` | -- | Unofficial API; includes canonical + external + native |
-| 3 | Daily Active Users | Dune | Execute saved query over Mantle activity tables for daily active users | Growthepie `daa` | Prefer Dune for consistency with other activity metrics |
-| 4 | Active Addresses | Dune | Execute saved query over Mantle activity tables for distinct active addresses | Growthepie `daa` | Also sourced from Dune; keep naming aligned with business terminology |
-| 5 | Stablecoin Supply | DefiLlama | `GET /stablecoincharts/Mantle` | -- | Returns circulating amounts per stablecoin per day |
-| 6 | Stablecoin Market Cap | DefiLlama | `GET /stablecoinchains` | -- | Aggregate mcap for Mantle stablecoins |
-| 7 | Mantle Chain Transactions | Dune | Execute saved query on Mantle transactions table with daily aggregation | Growthepie `txcount` | Prefer Dune as the primary activity source |
-| 8 | Stablecoin Transfer Volume | Dune | Execute saved query on `mantle.transactions` filtering known stablecoin contracts | -- | Requires Dune API key; pre-authored SQL |
-| 9 | DEX Volume | Dune | Execute saved query aggregating Mantle DEX protocol volume | DefiLlama `GET /overview/dexs/Mantle` | Use DefiLlama only if Dune coverage is incomplete |
-| 10 | MNT Volume | CoinGecko | `GET /api/v3/coins/mantle` field `market_data.total_volume.usd` | -- | Free tier rate-limited; cache aggressively |
-| 11 | MNT Market Cap | CoinGecko | `GET /api/v3/coins/mantle` field `market_data.market_cap.usd` | -- | Same call as MNT Volume |
+| 1 | TVL | DefiLlama | `GET https://api.llama.fi/v2/historicalChainTvl/Mantle` | -- | Keep separate from L2Beat TVS and Growthepie TVL because the semantics diverge materially |
+| 2 | Total Value Secured | L2Beat | `GET https://l2beat.com/api/scaling/tvs/mantle` | -- | Sum of native + canonical + external value |
+| 3 | Daily Active Users | Growthepie | `GET https://api.growthepie.com/v1/export/daa.json` | -- | Phase 1 assumes `DAU == DAA` |
+| 4 | Active Addresses | Growthepie | `GET https://api.growthepie.com/v1/export/daa.json` | -- | Same public source as `daily_active_users` in this phase |
+| 5 | Stablecoin Supply | DefiLlama | `GET https://stablecoins.llama.fi/stablecoincharts/Mantle` | -- | Use latest `totalCirculatingUSD.peggedUSD` |
+| 6 | Stablecoin Market Cap | DefiLlama | `GET https://stablecoins.llama.fi/stablecoinchains` | Growthepie `stables_mcap` | Growthepie is comparison-only until methodology reconciliation is needed |
+| 7 | Mantle Chain Transactions | Growthepie | `GET https://api.growthepie.com/v1/export/txcount.json` | L2Beat `GET /api/scaling/activity/mantle` | Public source preferred over Dune |
+| 8 | Stablecoin Transfer Volume | Dune | Execute saved query on `mantle.transactions` filtering known stablecoin contracts | -- | No clean public source confirmed in Phase 1 |
+| 9 | DEX Volume | DefiLlama | `GET https://api.llama.fi/overview/dexs/Mantle` | -- | Public chain-level DEX volume is available |
+| 10 | MNT Volume | CoinGecko | `GET /api/v3/coins/mantle` field `market_data.total_volume.usd` | -- | Not covered by the validated public trio |
+| 11 | MNT Market Cap | Growthepie | `GET https://api.growthepie.com/v1/fundamentals.json` metric `market_cap_usd` | CoinGecko | CoinGecko remains a comparison/fallback source |
 
 ### 3.2 Ecosystem Protocol Metrics
 
 | Protocol Type | Source | TVL Endpoint | Volume Endpoint | Borrow/Supply |
 |---------------|--------|-------------|-----------------|---------------|
-| Aave V3 | DefiLlama | `GET /api/protocol/aave-v3` chain=Mantle | -- | `totalLiquidityUSD` (supply), `totalBorrowUsd` from chain breakdown |
-| DEX (e.g. Merchant Moe) | DefiLlama | `GET /api/protocol/{slug}` | `GET /summary/dexs/{slug}` | Dune can be added later for protocol-specific volume if query maintenance is justified |
-| Non-DEX (e.g. Ondo) | DefiLlama | `GET /api/protocol/{slug}` | -- | -- |
-| Secondary Lending | DefiLlama | `GET /api/protocol/{slug}` | -- | Phase 1: TVL only |
+| Aave V3 | DefiLlama | `GET https://api.llama.fi/protocol/aave-v3` | -- | Use Mantle chain entries for supply, borrowed, utilization, and TVL |
+| DEX (e.g. Merchant Moe) | DefiLlama | `GET https://api.llama.fi/protocol/{slug}` | `GET https://api.llama.fi/summary/dexs/{slug}` | Public endpoints are sufficient for Phase 1 |
+| Non-DEX (e.g. Ondo) | DefiLlama | `GET https://api.llama.fi/protocol/{slug}` | -- | TVL only unless a special adapter is justified |
+| Secondary Lending | DefiLlama | `GET https://api.llama.fi/protocol/{slug}` | -- | Phase 1 stays TVL-first unless the product requires more fields |
 
 ### 3.3 Source Authentication
 
 | Source | Auth Method | Key Env Var |
 |--------|------------|-------------|
-| DefiLlama | None (free endpoints) | -- |
+| DefiLlama | None (public endpoints) | -- |
 | Growthepie | None | -- |
-| L2Beat | None (unofficial) | -- |
+| L2Beat | None (public, rate-limited in practice) | -- |
 | CoinGecko | Optional API key header | `COINGECKO_API_KEY` |
 | Dune | `X-Dune-API-Key` header | `DUNE_API_KEY` |
 
