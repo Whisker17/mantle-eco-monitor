@@ -51,7 +51,8 @@ class DexAdapter(ProtocolAdapter):
 
     async def _collect_volume(self, http: httpx.AsyncClient) -> list[MetricRecord]:
         resp = await http.get(f"https://api.llama.fi/summary/dexs/{self._slug}")
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            return []
         data = resp.json()
         total_24h = data.get("total24h")
         if total_24h is None:

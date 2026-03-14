@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+import httpx
 import pytest
 
 from src.ingestion.dune import DuneClient, DuneCollector, METRIC_QUERY_MAP
@@ -82,3 +83,16 @@ def test_dune_metric_query_map_keeps_only_uncovered_metrics():
     assert METRIC_QUERY_MAP == {
         "stablecoin_transfer_volume": "dune_stablecoin_volume_query_id",
     }
+
+
+@pytest.mark.asyncio
+async def test_dune_client_health_check_requires_success_status():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "unauthorized"})
+
+    client = DuneClient(
+        api_key="missing",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    assert await client.health_check() is False

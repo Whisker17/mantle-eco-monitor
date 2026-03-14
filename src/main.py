@@ -18,6 +18,7 @@ async def lifespan(app: FastAPI):
         from src.scheduler.jobs import build_scheduler
 
         scheduler = build_scheduler()
+        scheduler.__enter__()
         scheduler.start_in_background()
         app.state.scheduler = scheduler
 
@@ -25,6 +26,8 @@ async def lifespan(app: FastAPI):
 
     if hasattr(app.state, "scheduler"):
         app.state.scheduler.stop()
+        app.state.scheduler.wait_until_stopped()
+        app.state.scheduler.__exit__(None, None, None)
 
 
 def create_app() -> FastAPI:

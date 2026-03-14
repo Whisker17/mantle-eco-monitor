@@ -4,49 +4,115 @@ import logging
 
 from apscheduler import Scheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
+
+from config.settings import Settings
+from src.api.deps import get_session_factory
+from src.ingestion.coingecko import CoinGeckoCollector
+from src.ingestion.defillama import DefiLlamaCollector
+from src.ingestion.dune import DuneClient, DuneCollector
+from src.ingestion.growthepie import GrowthepieCollector
+from src.ingestion.l2beat import L2BeatCollector
+from src.protocols.aave import AaveAdapter
+from src.protocols.watchlist import WatchlistManager
+from src.scheduler.runtime import (
+    ProtocolAdapterCollector,
+    get_active_protocol_adapters,
+    refresh_watchlist,
+    run_collection_job,
+    run_source_health_job,
+)
 
 logger = logging.getLogger(__name__)
 
 
+def _get_runtime_dependencies():
+    settings = Settings()
+    session_factory = get_session_factory(settings)
+    return settings, session_factory
+
+
 async def core_defillama_job():
     logger.info("Running core_defillama collection")
+    _, session_factory = _get_runtime_dependencies()
+    return await run_collection_job("core_defillama", DefiLlamaCollector(), session_factory)
+
+
+async def core_growthepie_job():
+    logger.info("Running core_growthepie collection")
+    _, session_factory = _get_runtime_dependencies()
+    return await run_collection_job("core_growthepie", GrowthepieCollector(), session_factory)
 
 
 async def core_dune_job():
     logger.info("Running core_dune collection")
+    settings, session_factory = _get_runtime_dependencies()
+    collector = DuneCollector(DuneClient(settings.dune_api_key), settings)
+    return await run_collection_job("core_dune", collector, session_factory)
 
 
 async def core_l2beat_job():
     logger.info("Running core_l2beat collection")
+    _, session_factory = _get_runtime_dependencies()
+    return await run_collection_job("core_l2beat", L2BeatCollector(), session_factory)
 
 
 async def core_coingecko_job():
     logger.info("Running core_coingecko collection")
-
-
-async def core_growthepie_fallback_job():
-    logger.info("Running core_growthepie_fallback collection")
+    settings, session_factory = _get_runtime_dependencies()
+    return await run_collection_job(
+        "core_coingecko",
+        CoinGeckoCollector(api_key=settings.coingecko_api_key),
+        session_factory,
+    )
 
 
 async def eco_protocols_job():
     logger.info("Running eco_protocols collection")
+    _, session_factory = _get_runtime_dependencies()
+    adapters = await get_active_protocol_adapters(session_factory)
+    if not adapters:
+        await refresh_watchlist(session_factory, WatchlistManager())
+        adapters = await get_active_protocol_adapters(session_factory)
+    return await run_collection_job(
+        "eco_protocols",
+        ProtocolAdapterCollector(adapters),
+        session_factory,
+    )
 
 
 async def eco_aave_job():
     logger.info("Running eco_aave collection")
+    _, session_factory = _get_runtime_dependencies()
+    return await run_collection_job(
+        "eco_aave",
+        ProtocolAdapterCollector([AaveAdapter()]),
+        session_factory,
+    )
 
 
 async def watchlist_refresh_job():
     logger.info("Running watchlist_refresh")
+    _, session_factory = _get_runtime_dependencies()
+    count = await refresh_watchlist(session_factory, WatchlistManager())
+    return {"status": "refreshed", "count": count}
 
 
 async def source_health_job():
     logger.info("Running source_health check")
+    settings, session_factory = _get_runtime_dependencies()
+    collectors = [
+        DefiLlamaCollector(),
+        GrowthepieCollector(),
+        L2BeatCollector(),
+        CoinGeckoCollector(api_key=settings.coingecko_api_key),
+        DuneCollector(DuneClient(settings.dune_api_key), settings),
+    ]
+    return await run_source_health_job(session_factory, collectors)
 
 
 SCHEDULE_CONFIG = [
     {"id": "core_defillama", "func": core_defillama_job, "trigger": CronTrigger(hour="*/4", minute=0)},
+    {"id": "core_growthepie", "func": core_growthepie_job, "trigger": CronTrigger(hour="*/4", minute=2)},
     {"id": "core_coingecko", "func": core_coingecko_job, "trigger": CronTrigger(hour="*/4", minute=5)},
     {"id": "eco_aave", "func": eco_aave_job, "trigger": CronTrigger(hour="*/4", minute=10)},
     {"id": "core_l2beat", "func": core_l2beat_job, "trigger": CronTrigger(hour="*/6", minute=15)},

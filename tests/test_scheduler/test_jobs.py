@@ -8,6 +8,7 @@ def test_scheduler_registers_phase1_jobs():
 
     expected_ids = {
         "core_defillama",
+        "core_growthepie",
         "core_dune",
         "core_l2beat",
         "core_coingecko",
@@ -22,4 +23,4 @@ def test_scheduler_registers_phase1_jobs():
 def test_scheduler_has_correct_count():
     scheduler = build_scheduler()
     schedules = scheduler.get_schedules()
-    assert len(schedules) >= 8
+    assert len(schedules) >= 9

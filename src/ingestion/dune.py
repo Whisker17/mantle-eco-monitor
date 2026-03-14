@@ -50,7 +50,7 @@ class DuneClient:
         try:
             http = await self._get_http()
             resp = await http.get(f"{self.BASE_URL}/query/1/results", params={"limit": 1})
-            return resp.status_code < 500
+            return 200 <= resp.status_code < 300
         except Exception:
             return False
 

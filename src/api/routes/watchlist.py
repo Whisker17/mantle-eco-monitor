@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +11,7 @@ from src.api.schemas import WatchlistItemResponse, WatchlistResponse
 from src.db.models import WatchlistProtocol
 
 watchlist_router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @watchlist_router.get("/api/watchlist", response_model=WatchlistResponse)
@@ -47,7 +50,14 @@ async def refresh_watchlist(
     from src.protocols.watchlist import WatchlistManager
 
     manager = WatchlistManager()
-    seed = manager.get_seed()
-    await upsert_watchlist(session, seed)
+    try:
+        protocols = await manager.fetch_mantle_protocols()
+        ranked = manager.score_and_rank(protocols)
+        entries = manager.build_watchlist(ranked)
+    except Exception:
+        logger.exception("Watchlist refresh failed, falling back to seed list")
+        entries = manager.get_seed()
+
+    await upsert_watchlist(session, entries)
     await session.commit()
-    return {"status": "refreshed", "count": len(seed)}
+    return {"status": "refreshed", "count": len(entries)}

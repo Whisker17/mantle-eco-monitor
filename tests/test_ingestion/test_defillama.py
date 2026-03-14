@@ -30,7 +30,7 @@ def sample_defillama_tvl_payload():
 def sample_defillama_stablecoin_payload():
     return [
         {
-            "date": 1710374400,
+            "date": "1710374400",
             "totalCirculatingUSD": {"peggedUSD": 500_000_000},
         }
     ]

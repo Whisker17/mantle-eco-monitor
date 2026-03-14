@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from src.api.deps import get_db_session
 from src.db.models import AlertEvent, Base, MetricSnapshot, WatchlistProtocol
 from src.main import create_app
+from src.db.models import SourceRun
 
 
 @pytest.fixture()
@@ -103,4 +104,34 @@ async def seeded_watchlist(session_factory):
             added_at=datetime.now(tz=timezone.utc),
             updated_at=datetime.now(tz=timezone.utc),
         ))
+        await session.commit()
+
+
+@pytest.fixture()
+async def seeded_source_runs(session_factory):
+    now = datetime.now(tz=timezone.utc)
+    async with session_factory() as session:
+        session.add_all(
+            [
+                SourceRun(
+                    source_platform="defillama",
+                    job_name="core_defillama",
+                    status="success",
+                    records_collected=3,
+                    started_at=now - timedelta(minutes=10),
+                    completed_at=now - timedelta(minutes=9),
+                    created_at=now,
+                ),
+                SourceRun(
+                    source_platform="l2beat",
+                    job_name="source_health",
+                    status="failed",
+                    records_collected=0,
+                    error_message="timeout",
+                    started_at=now - timedelta(minutes=8),
+                    completed_at=now - timedelta(minutes=8),
+                    created_at=now,
+                ),
+            ]
+        )
         await session.commit()

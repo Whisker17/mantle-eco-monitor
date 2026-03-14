@@ -1,0 +1,52 @@
+from contextlib import asynccontextmanager
+
+import pytest
+from fastapi import FastAPI
+
+from src.main import lifespan
+
+
+class FakeScheduler:
+    def __init__(self):
+        self.entered = False
+        self.exited = False
+        self.started = False
+        self.stopped = False
+        self.waited = False
+
+    def __enter__(self):
+        self.entered = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.exited = True
+
+    def start_in_background(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
+
+    def wait_until_stopped(self):
+        self.waited = True
+
+
+@pytest.mark.asyncio
+async def test_lifespan_waits_for_scheduler_shutdown(monkeypatch):
+    fake_scheduler = FakeScheduler()
+
+    class FakeSettings:
+        scheduler_enabled = True
+
+    monkeypatch.setattr("config.settings.Settings", lambda: FakeSettings())
+    monkeypatch.setattr("src.scheduler.jobs.build_scheduler", lambda: fake_scheduler)
+
+    app = FastAPI()
+
+    async with lifespan(app):
+        assert fake_scheduler.entered is True
+        assert fake_scheduler.started is True
+
+    assert fake_scheduler.stopped is True
+    assert fake_scheduler.waited is True
+    assert fake_scheduler.exited is True

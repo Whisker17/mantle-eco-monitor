@@ -68,7 +68,7 @@ class DefiLlamaCollector(BaseCollector):
                 unit="usd",
                 source_platform="defillama",
                 source_ref=None,
-                collected_at=datetime.fromtimestamp(latest["date"], tz=timezone.utc),
+                collected_at=datetime.fromtimestamp(int(latest["date"]), tz=timezone.utc),
             )
         ]
 
