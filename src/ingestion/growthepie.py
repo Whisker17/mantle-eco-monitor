@@ -18,11 +18,15 @@ METRIC_KEY_MAP = {
     "txcount": [
         ("chain_transactions", "count"),
     ],
+    "market_cap_usd": [
+        ("mnt_market_cap", "usd"),
+    ],
 }
 
 
 class GrowthepieCollector(BaseCollector):
-    BASE = "https://api.growthepie.xyz"
+    BASE = "https://api.growthepie.com"
+    FUNDAMENTALS_PATH = "/v1/fundamentals.json"
 
     def __init__(self, http_client: httpx.AsyncClient | None = None):
         self._http = http_client or httpx.AsyncClient(timeout=30.0)
@@ -64,14 +68,14 @@ class GrowthepieCollector(BaseCollector):
         return records
 
     async def collect(self) -> list[MetricRecord]:
-        resp = await self._http.get(f"{self.BASE}/v1/fundamentals/full.json")
+        resp = await self._http.get(f"{self.BASE}{self.FUNDAMENTALS_PATH}")
         resp.raise_for_status()
         data = resp.json()
         return self._map_rows(data)
 
     async def health_check(self) -> bool:
         try:
-            resp = await self._http.get(f"{self.BASE}/v1/fundamentals/full.json")
+            resp = await self._http.get(f"{self.BASE}{self.FUNDAMENTALS_PATH}")
             return resp.status_code == 200
         except Exception:
             return False

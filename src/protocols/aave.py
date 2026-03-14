@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class AaveAdapter(ProtocolAdapter):
     SLUG = "aave-v3"
-    DEFILLAMA_URL = "https://api.llama.fi/api/protocol/aave-v3"
+    DEFILLAMA_URL = "https://api.llama.fi/protocol/aave-v3"
 
     @property
     def slug(self) -> str:

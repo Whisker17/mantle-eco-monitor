@@ -30,6 +30,9 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "live: hits public provider endpoints; skipped unless RUN_LIVE_SOURCE_TESTS=1",
+]
 
 [tool.setuptools.packages.find]
 include = ["src*", "config*"]

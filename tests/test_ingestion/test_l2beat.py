@@ -9,21 +9,21 @@ from src.ingestion.l2beat import L2BeatCollector
 @pytest.fixture()
 def sample_l2beat_payload():
     return {
+        "success": True,
         "data": {
-            "charts": {
-                "hourly": {
-                    "data": [
-                        [1710374400, 800_000_000, 200_000_000, 100_000_000],
-                    ]
-                }
-            }
-        }
+            "chart": {
+                "data": [
+                    [1710374400, 800_000_000, 200_000_000, 100_000_000, 3200],
+                ]
+            },
+        },
     }
 
 
 @pytest.fixture()
 def l2beat_collector(sample_l2beat_payload):
     async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/scaling/tvs/mantle"
         return httpx.Response(200, json=sample_l2beat_payload)
 
     transport = httpx.MockTransport(handler)

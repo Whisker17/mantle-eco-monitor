@@ -31,7 +31,7 @@ class DexAdapter(ProtocolAdapter):
         return records
 
     async def _collect_tvl(self, http: httpx.AsyncClient) -> list[MetricRecord]:
-        resp = await http.get(f"https://api.llama.fi/api/protocol/{self._slug}")
+        resp = await http.get(f"https://api.llama.fi/protocol/{self._slug}")
         resp.raise_for_status()
         data = resp.json()
         chain_tvls = data.get("chainTvls", {})

@@ -30,10 +30,9 @@ def coingecko_collector(sample_coingecko_payload):
 async def test_coingecko_collector_maps_mnt_metrics(coingecko_collector):
     records = await coingecko_collector.collect()
 
-    assert len(records) == 2
+    assert len(records) == 1
     names = {r.metric_name: r.value for r in records}
     assert names["mnt_volume"] == Decimal("95000000")
-    assert names["mnt_market_cap"] == Decimal("2500000000")
     assert all(r.entity == "mantle" for r in records)
     assert all(r.scope == "core" for r in records)
 

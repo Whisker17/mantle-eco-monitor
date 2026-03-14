@@ -63,3 +63,7 @@ def test_aave_adapter_slug_and_tier():
     adapter = AaveAdapter()
     assert adapter.slug == "aave-v3"
     assert adapter.monitoring_tier == "special"
+
+
+def test_aave_adapter_uses_current_defillama_protocol_path():
+    assert AaveAdapter.DEFILLAMA_URL == "https://api.llama.fi/protocol/aave-v3"

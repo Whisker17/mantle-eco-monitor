@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.ingestion.dune import DuneClient, DuneCollector
+from src.ingestion.dune import DuneClient, DuneCollector, METRIC_QUERY_MAP
 
 
 class FakeDuneClient(DuneClient):
@@ -76,3 +76,9 @@ def test_dune_collector_source_platform(fake_dune_client):
 async def test_dune_collector_health_check(fake_dune_client):
     collector = DuneCollector(fake_dune_client)
     assert await collector.health_check() is True
+
+
+def test_dune_metric_query_map_keeps_only_uncovered_metrics():
+    assert METRIC_QUERY_MAP == {
+        "stablecoin_transfer_volume": "dune_stablecoin_volume_query_id",
+    }

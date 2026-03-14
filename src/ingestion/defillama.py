@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 class DefiLlamaCollector(BaseCollector):
     BASE = "https://api.llama.fi"
     STABLES_BASE = "https://stablecoins.llama.fi"
+    PROTOCOL_PATH = "/protocol"
 
     def __init__(self, http_client: httpx.AsyncClient | None = None):
         self._http = http_client or httpx.AsyncClient(timeout=30.0)
@@ -27,6 +28,7 @@ class DefiLlamaCollector(BaseCollector):
         records.extend(await self._collect_chain_tvl())
         records.extend(await self._collect_stablecoin_supply())
         records.extend(await self._collect_stablecoin_mcap())
+        records.extend(await self._collect_chain_dex_volume())
         return records
 
     async def _collect_chain_tvl(self) -> list[MetricRecord]:
@@ -56,10 +58,7 @@ class DefiLlamaCollector(BaseCollector):
         if not data:
             return []
         latest = data[-1]
-        total = sum(
-            Decimal(str(v.get("peggedUSD", 0)))
-            for v in latest.get("totalCirculating", {}).values()
-        )
+        total = Decimal(str(latest.get("totalCirculatingUSD", {}).get("peggedUSD", 0)))
         return [
             MetricRecord(
                 scope="core",
@@ -70,6 +69,33 @@ class DefiLlamaCollector(BaseCollector):
                 source_platform="defillama",
                 source_ref=None,
                 collected_at=datetime.fromtimestamp(latest["date"], tz=timezone.utc),
+            )
+        ]
+
+    async def _collect_chain_dex_volume(self) -> list[MetricRecord]:
+        resp = await self._http.get(f"{self.BASE}/overview/dexs/Mantle")
+        resp.raise_for_status()
+        data = resp.json()
+        chart = data.get("totalDataChart", [])
+        if chart:
+            timestamp, value = chart[-1]
+            collected_at = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        else:
+            value = data.get("total24h")
+            if value is None:
+                return []
+            collected_at = datetime.now(tz=timezone.utc)
+
+        return [
+            MetricRecord(
+                scope="core",
+                entity="mantle",
+                metric_name="dex_volume",
+                value=Decimal(str(value)),
+                unit="usd",
+                source_platform="defillama",
+                source_ref="https://defillama.com/chain/Mantle?flows=false&dexs=true",
+                collected_at=collected_at,
             )
         ]
 
@@ -94,7 +120,7 @@ class DefiLlamaCollector(BaseCollector):
         return []
 
     async def collect_protocol_tvl(self, slug: str) -> list[MetricRecord]:
-        resp = await self._http.get(f"{self.BASE}/api/protocol/{slug}")
+        resp = await self._http.get(f"{self.BASE}{self.PROTOCOL_PATH}/{slug}")
         resp.raise_for_status()
         data = resp.json()
         chain_tvls = data.get("chainTvls", {})

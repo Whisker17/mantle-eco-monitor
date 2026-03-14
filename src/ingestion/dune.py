@@ -12,11 +12,7 @@ from src.ingestion.base import BaseCollector, MetricRecord
 logger = logging.getLogger(__name__)
 
 METRIC_QUERY_MAP = {
-    "daily_active_users": "dune_daily_active_users_query_id",
-    "active_addresses": "dune_active_addresses_query_id",
-    "chain_transactions": "dune_chain_transactions_query_id",
     "stablecoin_transfer_volume": "dune_stablecoin_volume_query_id",
-    "dex_volume": "dune_dex_volume_query_id",
 }
 
 METRIC_UNITS = {

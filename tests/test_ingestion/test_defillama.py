@@ -31,10 +31,7 @@ def sample_defillama_stablecoin_payload():
     return [
         {
             "date": 1710374400,
-            "totalCirculating": {
-                "USDT": {"peggedUSD": 300_000_000},
-                "USDC": {"peggedUSD": 200_000_000},
-            },
+            "totalCirculatingUSD": {"peggedUSD": 500_000_000},
         }
     ]
 
@@ -48,16 +45,30 @@ def sample_defillama_stablecoin_chains_payload():
 
 
 @pytest.fixture()
+def sample_defillama_dex_overview_payload():
+    return {
+        "chain": "Mantle",
+        "total24h": 32_000_000,
+        "totalDataChart": [
+            [1710288000, 28_000_000],
+            [1710374400, 32_000_000],
+        ],
+    }
+
+
+@pytest.fixture()
 def defillama_collector(
     sample_defillama_tvl_payload,
     sample_defillama_stablecoin_payload,
     sample_defillama_stablecoin_chains_payload,
+    sample_defillama_dex_overview_payload,
 ):
     transport = FakeTransport(
         {
             "historicalChainTvl/Mantle": sample_defillama_tvl_payload,
             "stablecoincharts/Mantle": sample_defillama_stablecoin_payload,
             "stablecoinchains": sample_defillama_stablecoin_chains_payload,
+            "overview/dexs/Mantle": sample_defillama_dex_overview_payload,
         }
     )
     client = httpx.AsyncClient(transport=transport)
@@ -101,6 +112,7 @@ async def test_defillama_collect_returns_all_core_metrics(defillama_collector):
     assert "tvl" in names
     assert "stablecoin_supply" in names
     assert "stablecoin_mcap" in names
+    assert "dex_volume" in names
 
 
 def test_defillama_source_platform():

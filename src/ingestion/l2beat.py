@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 class L2BeatCollector(BaseCollector):
     BASE = "https://l2beat.com/api"
+    TVS_PATH = "/scaling/tvs/mantle"
 
     def __init__(self, http_client: httpx.AsyncClient | None = None):
         self._http = http_client or httpx.AsyncClient(timeout=30.0)
@@ -22,18 +23,15 @@ class L2BeatCollector(BaseCollector):
         return "l2beat"
 
     async def collect(self) -> list[MetricRecord]:
-        resp = await self._http.get(f"{self.BASE}/scaling/tvl/mantle")
+        resp = await self._http.get(f"{self.BASE}{self.TVS_PATH}")
         resp.raise_for_status()
         data = resp.json()
 
-        charts = data.get("data", {}).get("charts", {})
-        tvl_data = charts.get("hourly", {}).get("data", [])
-        if not tvl_data:
-            tvl_data = charts.get("daily", {}).get("data", [])
-        if not tvl_data:
+        tvs_data = data.get("data", {}).get("chart", {}).get("data", [])
+        if not tvs_data:
             return []
 
-        latest = tvl_data[-1]
+        latest = tvs_data[-1]
         timestamp = latest[0]
         total = Decimal(str(latest[1])) + Decimal(str(latest[2])) + Decimal(str(latest[3]))
 
@@ -52,7 +50,7 @@ class L2BeatCollector(BaseCollector):
 
     async def health_check(self) -> bool:
         try:
-            resp = await self._http.get(f"{self.BASE}/scaling/tvl/mantle")
+            resp = await self._http.get(f"{self.BASE}{self.TVS_PATH}")
             return resp.status_code == 200
         except Exception:
             return False

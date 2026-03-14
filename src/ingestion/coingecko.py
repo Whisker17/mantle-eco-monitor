@@ -51,21 +51,6 @@ class CoinGeckoCollector(BaseCollector):
                 )
             )
 
-        mcap = market.get("market_cap", {}).get("usd")
-        if mcap is not None:
-            records.append(
-                MetricRecord(
-                    scope="core",
-                    entity="mantle",
-                    metric_name="mnt_market_cap",
-                    value=Decimal(str(mcap)),
-                    unit="usd",
-                    source_platform="coingecko",
-                    source_ref="https://www.coingecko.com/en/coins/mantle",
-                    collected_at=now,
-                )
-            )
-
         return records
 
     async def health_check(self) -> bool:
