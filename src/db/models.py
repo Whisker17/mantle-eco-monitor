@@ -98,6 +98,34 @@ class AlertEvent(Base):
     )
 
 
+class DeliveryEvent(Base):
+    __tablename__ = "delivery_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    logical_key: Mapped[str] = mapped_column(Text, nullable=False)
+    environment: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="now()"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="now()"
+    )
+
+    __table_args__ = (
+        Index("idx_delivery_events_logical_key", "logical_key", unique=True),
+        Index("idx_delivery_events_status", "channel", "status"),
+    )
+
+
 class WatchlistProtocol(Base):
     __tablename__ = "watchlist_protocols"
 

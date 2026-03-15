@@ -7,7 +7,7 @@ from enum import Enum
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import AlertEvent, MetricSnapshot, SourceRun, WatchlistProtocol
+from src.db.models import AlertEvent, DeliveryEvent, MetricSnapshot, SourceRun, WatchlistProtocol
 from src.ingestion.base import MetricRecord
 
 
@@ -73,6 +73,52 @@ async def insert_source_run(session: AsyncSession, **kwargs) -> SourceRun:
     session.add(run)
     await session.flush()
     return run
+
+
+async def create_delivery_event(session: AsyncSession, **kwargs) -> DeliveryEvent:
+    event = DeliveryEvent(**kwargs)
+    session.add(event)
+    await session.flush()
+    return event
+
+
+async def get_delivery_event_by_logical_key(
+    session: AsyncSession,
+    logical_key: str,
+) -> DeliveryEvent | None:
+    result = await session.execute(
+        select(DeliveryEvent).where(DeliveryEvent.logical_key == logical_key)
+    )
+    return result.scalar_one_or_none()
+
+
+async def mark_delivery_event_delivered(
+    session: AsyncSession,
+    event: DeliveryEvent,
+    *,
+    delivered_at: datetime,
+) -> DeliveryEvent:
+    event.status = "delivered"
+    event.attempt_count += 1
+    event.last_error = None
+    event.delivered_at = delivered_at
+    event.updated_at = datetime.now(tz=timezone.utc)
+    await session.flush()
+    return event
+
+
+async def mark_delivery_event_failed(
+    session: AsyncSession,
+    event: DeliveryEvent,
+    *,
+    error: str,
+) -> DeliveryEvent:
+    event.status = "failed"
+    event.attempt_count += 1
+    event.last_error = error
+    event.updated_at = datetime.now(tz=timezone.utc)
+    await session.flush()
+    return event
 
 
 async def upsert_watchlist(

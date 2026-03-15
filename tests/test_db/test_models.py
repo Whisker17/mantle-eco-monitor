@@ -1,9 +1,10 @@
-from src.db.models import AlertEvent, MetricSnapshot, SourceRun, WatchlistProtocol
+from src.db.models import AlertEvent, DeliveryEvent, MetricSnapshot, SourceRun, WatchlistProtocol
 
 
 def test_expected_tables_exist():
     assert MetricSnapshot.__tablename__ == "metric_snapshots"
     assert AlertEvent.__tablename__ == "alert_events"
+    assert DeliveryEvent.__tablename__ == "delivery_events"
     assert WatchlistProtocol.__tablename__ == "watchlist_protocols"
     assert SourceRun.__tablename__ == "source_runs"
 
@@ -43,4 +44,22 @@ def test_source_run_has_required_columns():
         "id", "source_platform", "job_name", "status",
         "records_collected", "error_message", "http_status",
         "latency_ms", "started_at", "completed_at", "created_at",
+    }
+
+
+def test_delivery_event_has_required_columns():
+    cols = {c.name for c in DeliveryEvent.__table__.columns}
+    assert cols >= {
+        "id",
+        "channel",
+        "entity_type",
+        "entity_id",
+        "logical_key",
+        "environment",
+        "status",
+        "attempt_count",
+        "last_error",
+        "delivered_at",
+        "created_at",
+        "updated_at",
     }
