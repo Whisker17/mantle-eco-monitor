@@ -23,6 +23,7 @@ def test_build_scheduler_registers_prod_cron_jobs():
         "core_dune",
         "core_l2beat",
         "core_coingecko",
+        "daily_summary",
         "eco_protocols",
         "eco_aave",
         "watchlist_refresh",
@@ -53,6 +54,18 @@ def test_build_scheduler_registers_interval_jobs_and_skips_manual_jobs():
     assert isinstance(schedule_by_id["core_l2beat"].trigger, IntervalTrigger)
     assert isinstance(schedule_by_id["core_coingecko"].trigger, IntervalTrigger)
     assert isinstance(schedule_by_id["source_health"].trigger, IntervalTrigger)
+
+
+def test_build_scheduler_registers_daily_summary_with_prod_cron():
+    class FakeSettings:
+        scheduler_profile = "prod"
+        scheduler_config_path = "config/scheduler.toml"
+
+    scheduler = build_scheduler(FakeSettings())
+    schedule_by_id = {schedule.id: schedule for schedule in scheduler.get_schedules()}
+
+    assert "daily_summary" in schedule_by_id
+    assert isinstance(schedule_by_id["daily_summary"].trigger, CronTrigger)
 
 
 def test_build_scheduler_skips_disabled_jobs(tmp_path):
@@ -282,10 +295,11 @@ async def test_core_dune_job_uses_configured_dune_collector(monkeypatch):
 
     captured = {}
 
-    async def fake_run_collection_job(job_name, collector, session_factory):
+    async def fake_run_collection_job(job_name, collector, session_factory, notification_service=None):
         captured["job_name"] = job_name
         captured["collector"] = collector
         captured["session_factory"] = session_factory
+        captured["notification_service"] = notification_service
         return "ok"
 
     monkeypatch.setattr("src.scheduler.jobs.run_collection_job", fake_run_collection_job)
@@ -296,4 +310,5 @@ async def test_core_dune_job_uses_configured_dune_collector(monkeypatch):
     assert captured["job_name"] == "core_dune"
     assert captured["session_factory"] is fake_session_factory
     assert isinstance(captured["collector"], DuneCollector)
+    assert captured["notification_service"] is not None
     assert captured["collector"]._settings.dune_stablecoin_volume_query_id == 123

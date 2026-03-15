@@ -28,6 +28,11 @@ mode = "cron"
 hour = "10,18"
 minute = 40
 
+[profiles.prod.jobs.daily_summary]
+mode = "cron"
+hour = 9
+minute = 5
+
 [profiles.prod.jobs.eco_aave]
 mode = "cron"
 hour = "10,18"
@@ -68,6 +73,9 @@ mode = "manual"
 mode = "interval"
 minutes = 5
 
+[profiles.dev_live.jobs.daily_summary]
+mode = "manual"
+
 [profiles.dev_live.jobs.eco_aave]
 mode = "manual"
 
@@ -98,6 +106,9 @@ mode = "disabled"
 mode = "disabled"
 
 [profiles.ci.jobs.core_coingecko]
+mode = "disabled"
+
+[profiles.ci.jobs.daily_summary]
 mode = "disabled"
 
 [profiles.ci.jobs.eco_aave]

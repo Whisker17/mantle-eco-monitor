@@ -25,6 +25,8 @@ from src.scheduler.runtime import (
     run_collection_job,
     run_source_health_job,
 )
+from src.services.daily_summary import DailySummaryService
+from src.services.llm import LLMClient
 from src.services.notifications import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -96,6 +98,26 @@ async def core_coingecko_job():
     )
 
 
+async def daily_summary_job():
+    logger.info("Running daily_summary delivery")
+    settings, session_factory = _get_runtime_dependencies()
+    if not settings.llm_api_base or not settings.llm_api_key or not settings.llm_model:
+        logger.warning("Skipping daily_summary because LLM settings are incomplete")
+        return {"status": "skipped", "reason": "llm_not_configured"}
+
+    service = DailySummaryService(
+        session_factory=session_factory,
+        llm_client=LLMClient(
+            api_base=settings.llm_api_base,
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+            timeout_seconds=settings.llm_timeout_seconds,
+        ),
+        notification_service=_get_notification_service(settings, session_factory),
+    )
+    return await service.send_previous_day_summary()
+
+
 async def eco_protocols_job():
     logger.info("Running eco_protocols collection")
     settings, session_factory = _get_runtime_dependencies()
@@ -148,6 +170,7 @@ JOB_REGISTRY = {
     "core_dune": core_dune_job,
     "core_l2beat": core_l2beat_job,
     "core_coingecko": core_coingecko_job,
+    "daily_summary": daily_summary_job,
     "eco_protocols": eco_protocols_job,
     "eco_aave": eco_aave_job,
     "watchlist_refresh": watchlist_refresh_job,
