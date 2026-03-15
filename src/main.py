@@ -6,6 +6,7 @@ from src.api.routes.alerts import alerts_router
 from src.api.routes.health import health_router
 from src.api.routes.metrics import metrics_router
 from src.api.routes.watchlist import watchlist_router
+from src.integrations.lark.router import lark_router
 
 
 @asynccontextmanager
@@ -35,4 +36,5 @@ def create_app() -> FastAPI:
     app.include_router(alerts_router)
     app.include_router(metrics_router)
     app.include_router(watchlist_router)
+    app.include_router(lark_router)
     return app

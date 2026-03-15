@@ -44,6 +44,25 @@ class LarkClient:
             if created_client:
                 await client.aclose()
 
+    async def reply_card(self, *, message_id: str, card: dict[str, Any]) -> dict[str, Any]:
+        token = await self._get_tenant_access_token()
+        created_client = self._http_client is None
+        client = self._http_client or httpx.AsyncClient(timeout=30.0)
+        try:
+            response = await client.post(
+                f"{self._base_url}/open-apis/im/v1/messages/{message_id}/reply",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "msg_type": "interactive",
+                    "content": json.dumps(card),
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+        finally:
+            if created_client:
+                await client.aclose()
+
     async def _get_tenant_access_token(self) -> str:
         now = time.time()
         if self._tenant_access_token and now < self._tenant_access_token_expires_at:
