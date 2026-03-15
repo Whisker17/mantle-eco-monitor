@@ -115,6 +115,46 @@ def test_lark_events_route_dispatches_message_event_to_bot_query_service(test_ap
     assert lark_client.replies[0]["message_id"] == "om_1"
 
 
+def test_lark_events_route_rejects_message_events_when_bot_is_disabled(test_app, monkeypatch):
+    from src.integrations.lark import router as lark_router_module
+
+    class DisabledBotSettings:
+        database_url = "sqlite+aiosqlite:///ignored.db"
+        lark_bot_enabled = False
+        lark_verification_token = "verify_x"
+        lark_environment = "dev"
+        lark_app_id = ""
+        lark_app_secret = ""
+        llm_api_base = ""
+        llm_api_key = ""
+        llm_model = ""
+        llm_timeout_seconds = 30
+
+    monkeypatch.setattr(lark_router_module, "Settings", lambda: DisabledBotSettings())
+
+    response = test_app.post(
+        "/api/integrations/lark/events",
+        json={
+            "schema": "2.0",
+            "header": {
+                "event_id": "evt_disabled",
+                "event_type": "im.message.receive_v1",
+                "token": "verify_x",
+            },
+            "event": {
+                "message": {
+                    "message_id": "om_disabled",
+                    "message_type": "text",
+                    "content": json.dumps({"text": "@bot mantle tvl latest"}),
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Lark bot is disabled"}
+
+
 def test_lark_events_route_ignores_duplicate_event_ids(test_app, monkeypatch):
     from src.integrations.lark import router as lark_router_module
 
@@ -156,6 +196,7 @@ def test_build_bot_query_service_passes_openrouter_metadata(monkeypatch):
 
     class FakeSettings:
         database_url = "sqlite+aiosqlite:///ignored.db"
+        bot_external_actions_enabled = False
         llm_api_base = "https://openrouter.ai/api/v1"
         llm_api_key = "key_x"
         llm_model = "nvidia/nemotron-3-super-120b-a12b:free"

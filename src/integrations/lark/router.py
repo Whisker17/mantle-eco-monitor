@@ -34,6 +34,7 @@ def _build_bot_query_service(settings: Settings):
             app_url=settings.llm_app_url,
             timeout_seconds=settings.llm_timeout_seconds,
         ),
+        external_actions_enabled=settings.bot_external_actions_enabled,
     )
 
 
@@ -83,6 +84,9 @@ async def handle_lark_event(
         if not isinstance(challenge, str):
             raise HTTPException(status_code=400, detail="Missing challenge")
         return {"challenge": challenge}
+
+    if not settings.lark_bot_enabled:
+        raise HTTPException(status_code=503, detail="Lark bot is disabled")
 
     header = payload.get("header", {})
     event_id = header.get("event_id")
