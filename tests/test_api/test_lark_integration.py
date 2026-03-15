@@ -149,3 +149,31 @@ def test_lark_events_route_ignores_duplicate_event_ids(test_app, monkeypatch):
     assert second.json() == {"status": "ignored", "reason": "duplicate"}
     assert bot_service.messages == ["@bot mantle tvl latest"]
     assert len(lark_client.replies) == 1
+
+
+def test_build_bot_query_service_passes_openrouter_metadata(monkeypatch):
+    from src.integrations.lark import router as lark_router_module
+
+    class FakeSettings:
+        database_url = "sqlite+aiosqlite:///ignored.db"
+        llm_api_base = "https://openrouter.ai/api/v1"
+        llm_api_key = "key_x"
+        llm_model = "nvidia/nemotron-3-super-120b-a12b:free"
+        llm_app_name = "mantle-eco-monitor"
+        llm_app_url = "https://github.com/Whisker17/mantle-eco-monitor"
+        llm_timeout_seconds = 45
+
+    captured = {}
+
+    class FakeLLMClient:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(lark_router_module, "LLMClient", FakeLLMClient)
+    monkeypatch.setattr(lark_router_module, "get_session_factory", lambda settings: "session-factory")
+
+    service = lark_router_module._build_bot_query_service(FakeSettings())
+
+    assert service._session_factory == "session-factory"
+    assert captured["kwargs"]["app_name"] == "mantle-eco-monitor"
+    assert captured["kwargs"]["app_url"] == "https://github.com/Whisker17/mantle-eco-monitor"

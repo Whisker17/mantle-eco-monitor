@@ -111,6 +111,8 @@ async def daily_summary_job():
             api_base=settings.llm_api_base,
             api_key=settings.llm_api_key,
             model=settings.llm_model,
+            app_name=settings.llm_app_name,
+            app_url=settings.llm_app_url,
             timeout_seconds=settings.llm_timeout_seconds,
         ),
         notification_service=_get_notification_service(settings, session_factory),

@@ -5,7 +5,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 import src.scheduler.__main__ as scheduler_cli
 import src.scheduler.jobs as scheduler_jobs
 from src.ingestion.dune import DuneCollector
-from src.scheduler.jobs import build_scheduler, core_dune_job, load_scheduler_profile, run_job_now
+from src.scheduler.jobs import build_scheduler, core_dune_job, daily_summary_job, load_scheduler_profile, run_job_now
 
 
 def test_build_scheduler_registers_prod_cron_jobs():
@@ -312,3 +312,43 @@ async def test_core_dune_job_uses_configured_dune_collector(monkeypatch):
     assert isinstance(captured["collector"], DuneCollector)
     assert captured["notification_service"] is not None
     assert captured["collector"]._settings.dune_stablecoin_volume_query_id == 123
+
+
+@pytest.mark.asyncio
+async def test_daily_summary_job_passes_openrouter_metadata_to_llm_client(monkeypatch):
+    class FakeSettings:
+        llm_api_base = "https://openrouter.ai/api/v1"
+        llm_api_key = "key_x"
+        llm_model = "nvidia/nemotron-3-super-120b-a12b:free"
+        llm_app_name = "mantle-eco-monitor"
+        llm_app_url = "https://github.com/Whisker17/mantle-eco-monitor"
+        llm_timeout_seconds = 45
+        lark_delivery_enabled = False
+
+    fake_session_factory = object()
+    monkeypatch.setattr(
+        "src.scheduler.jobs._get_runtime_dependencies",
+        lambda: (FakeSettings(), fake_session_factory),
+    )
+
+    captured = {}
+
+    class FakeLLMClient:
+        def __init__(self, **kwargs):
+            captured["llm_kwargs"] = kwargs
+
+    class FakeDailySummaryService:
+        def __init__(self, **kwargs):
+            captured["service_kwargs"] = kwargs
+
+        async def send_previous_day_summary(self):
+            return {"status": "sent"}
+
+    monkeypatch.setattr("src.scheduler.jobs.LLMClient", FakeLLMClient)
+    monkeypatch.setattr("src.scheduler.jobs.DailySummaryService", FakeDailySummaryService)
+
+    result = await daily_summary_job()
+
+    assert result == {"status": "sent"}
+    assert captured["llm_kwargs"]["app_name"] == "mantle-eco-monitor"
+    assert captured["llm_kwargs"]["app_url"] == "https://github.com/Whisker17/mantle-eco-monitor"
