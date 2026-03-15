@@ -2,8 +2,9 @@ import pytest
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+import src.scheduler.jobs as scheduler_jobs
 from src.ingestion.dune import DuneCollector
-from src.scheduler.jobs import build_scheduler, core_dune_job, load_scheduler_profile
+from src.scheduler.jobs import build_scheduler, core_dune_job, load_scheduler_profile, run_job_now
 
 
 def test_build_scheduler_registers_prod_cron_jobs():
@@ -176,6 +177,57 @@ minute = 0
 
     with pytest.raises(ValueError, match="Unknown scheduler job id"):
         load_scheduler_profile(FakeSettings())
+
+
+@pytest.mark.asyncio
+async def test_run_job_now_dispatches_known_job(monkeypatch):
+    captured = {}
+
+    async def fake_job():
+        captured["ran"] = True
+        return {"status": "ok"}
+
+    monkeypatch.setitem(scheduler_jobs.JOB_REGISTRY, "core_defillama", fake_job)
+
+    class FakeSettings:
+        scheduler_profile = "prod"
+        scheduler_config_path = "config/scheduler.toml"
+
+    result = await run_job_now("core_defillama", FakeSettings())
+
+    assert result == {"status": "ok"}
+    assert captured["ran"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_job_now_rejects_unknown_job_id():
+    class FakeSettings:
+        scheduler_profile = "prod"
+        scheduler_config_path = "config/scheduler.toml"
+
+    with pytest.raises(ValueError, match="Unknown scheduler job id"):
+        await run_job_now("not_a_real_job", FakeSettings())
+
+
+@pytest.mark.asyncio
+async def test_run_job_now_rejects_disabled_jobs(tmp_path):
+    config_path = tmp_path / "scheduler.toml"
+    config_path.write_text(
+        """
+active_profile = "ci"
+
+[profiles.ci.jobs.core_defillama]
+mode = "disabled"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class FakeSettings:
+        scheduler_profile = "ci"
+        scheduler_config_path = str(config_path)
+
+    with pytest.raises(ValueError, match="disabled"):
+        await run_job_now("core_defillama", FakeSettings())
 
 
 @pytest.mark.asyncio

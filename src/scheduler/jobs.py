@@ -159,6 +159,19 @@ def is_scheduler_enabled(settings: Settings) -> bool:
     return profile.get("scheduler_enabled", True)
 
 
+async def run_job_now(job_id: str, settings: Settings | None = None):
+    if job_id not in JOB_REGISTRY:
+        raise ValueError(f"Unknown scheduler job id: {job_id}")
+
+    settings = settings or Settings()
+    _, profile = load_scheduler_profile(settings)
+    job_config = profile.get("jobs", {}).get(job_id, {})
+    if job_config.get("mode") == "disabled":
+        raise ValueError(f"Scheduler job is disabled in profile: {job_id}")
+
+    return await JOB_REGISTRY[job_id]()
+
+
 def _build_trigger(job_id: str, job_config: dict[str, Any], timezone: str | None):
     mode = job_config.get("mode")
     if mode == "cron":
