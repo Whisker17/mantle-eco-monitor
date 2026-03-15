@@ -5,7 +5,7 @@ import json
 
 from sqlalchemy import Boolean, Date, DateTime, Index, Integer, Numeric, Text, TypeDecorator, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, validates
 
 
 class StringList(TypeDecorator):
@@ -61,6 +61,11 @@ class MetricSnapshot(Base):
         Index("idx_snapshots_lookup", "entity", "metric_name", collected_at.desc()),
         Index("idx_snapshots_scope_time", "scope", collected_at.desc()),
     )
+
+    @validates("collected_at")
+    def _sync_collected_day(self, key: str, value: datetime) -> datetime:
+        self.collected_day = value.date()
+        return value
 
 
 class MetricSyncState(Base):

@@ -4,8 +4,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 import src.scheduler.__main__ as scheduler_cli
 import src.scheduler.jobs as scheduler_jobs
-from src.ingestion.dune import DuneCollector
 from src.scheduler.jobs import build_scheduler, core_dune_job, daily_summary_job, load_scheduler_profile, run_job_now
+from src.services.dune_sync import DuneSyncService
 
 
 def test_build_scheduler_registers_prod_cron_jobs():
@@ -294,9 +294,12 @@ def test_scheduler_cli_run_dispatches_job(monkeypatch, capsys):
 
 
 @pytest.mark.asyncio
-async def test_core_dune_job_uses_configured_dune_collector(monkeypatch):
+async def test_core_dune_job_uses_sync_service_runtime(monkeypatch):
     class FakeSettings:
         dune_api_key = "token"
+        dune_daily_active_users_query_id = 0
+        dune_active_addresses_query_id = 0
+        dune_chain_transactions_query_id = 0
         dune_stablecoin_volume_query_id = 123
 
     fake_session_factory = object()
@@ -307,23 +310,23 @@ async def test_core_dune_job_uses_configured_dune_collector(monkeypatch):
 
     captured = {}
 
-    async def fake_run_collection_job(job_name, collector, session_factory, notification_service=None):
+    async def fake_run_dune_sync_job(job_name, sync_service, session_factory, notification_service=None):
         captured["job_name"] = job_name
-        captured["collector"] = collector
+        captured["sync_service"] = sync_service
         captured["session_factory"] = session_factory
         captured["notification_service"] = notification_service
         return "ok"
 
-    monkeypatch.setattr("src.scheduler.jobs.run_collection_job", fake_run_collection_job)
+    monkeypatch.setattr("src.scheduler.jobs.run_dune_sync_job", fake_run_dune_sync_job)
 
     result = await core_dune_job()
 
     assert result == "ok"
     assert captured["job_name"] == "core_dune"
     assert captured["session_factory"] is fake_session_factory
-    assert isinstance(captured["collector"], DuneCollector)
+    assert isinstance(captured["sync_service"], DuneSyncService)
     assert captured["notification_service"] is not None
-    assert captured["collector"]._settings.dune_stablecoin_volume_query_id == 123
+    assert captured["sync_service"]._settings.dune_stablecoin_volume_query_id == 123
 
 
 @pytest.mark.asyncio

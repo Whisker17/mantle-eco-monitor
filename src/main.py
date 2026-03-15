@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,7 +7,17 @@ from src.api.routes.alerts import alerts_router
 from src.api.routes.health import health_router
 from src.api.routes.metrics import metrics_router
 from src.api.routes.watchlist import watchlist_router
+from src.ingestion.dune import has_configured_dune_queries
 from src.integrations.lark.router import lark_router
+
+
+def _start_background_dune_sync(app: FastAPI, settings) -> None:
+    from src.scheduler.jobs import core_dune_job
+
+    if not has_configured_dune_queries(settings):
+        return
+
+    app.state.dune_sync_task = asyncio.create_task(core_dune_job())
 
 
 @asynccontextmanager
@@ -21,8 +32,12 @@ async def lifespan(app: FastAPI):
         scheduler.__enter__()
         scheduler.start_in_background()
         app.state.scheduler = scheduler
+        _start_background_dune_sync(app, settings)
 
     yield
+
+    if hasattr(app.state, "dune_sync_task") and not app.state.dune_sync_task.done():
+        app.state.dune_sync_task.cancel()
 
     if hasattr(app.state, "scheduler"):
         app.state.scheduler.stop()

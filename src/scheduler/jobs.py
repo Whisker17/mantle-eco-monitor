@@ -23,8 +23,10 @@ from src.scheduler.runtime import (
     get_active_protocol_adapters,
     refresh_watchlist,
     run_collection_job,
+    run_dune_sync_job,
     run_source_health_job,
 )
+from src.services.dune_sync import DuneSyncService
 from src.services.daily_summary import DailySummaryService
 from src.services.llm import LLMClient
 from src.services.notifications import NotificationService
@@ -67,10 +69,12 @@ async def core_growthepie_job():
 async def core_dune_job():
     logger.info("Running core_dune collection")
     settings, session_factory = _get_runtime_dependencies()
-    collector = DuneCollector(DuneClient(settings.dune_api_key), settings)
-    return await run_collection_job(
+    return await run_dune_sync_job(
         "core_dune",
-        collector,
+        DuneSyncService(
+            settings=settings,
+            session_factory=session_factory,
+        ),
         session_factory,
         notification_service=_get_notification_service(settings, session_factory),
     )

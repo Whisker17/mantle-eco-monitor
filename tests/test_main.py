@@ -31,6 +31,17 @@ class FakeScheduler:
         self.waited = True
 
 
+class FakeTask:
+    def __init__(self):
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+    def done(self):
+        return False
+
+
 @pytest.mark.asyncio
 async def test_lifespan_waits_for_scheduler_shutdown(monkeypatch):
     fake_scheduler = FakeScheduler()
@@ -70,3 +81,38 @@ async def test_lifespan_skips_scheduler_when_profile_disables_it(monkeypatch):
 
     async with lifespan(app):
         assert hasattr(app.state, "scheduler") is False
+
+
+@pytest.mark.asyncio
+async def test_lifespan_starts_background_dune_sync_task(monkeypatch):
+    fake_scheduler = FakeScheduler()
+    fake_task = FakeTask()
+    created = {}
+
+    class FakeSettings:
+        scheduler_enabled = True
+
+    async def fake_core_dune_job():
+        created["ran"] = True
+        return {"status": "ok"}
+
+    def fake_create_task(coro):
+        created["task_created"] = True
+        coro.close()
+        return fake_task
+
+    monkeypatch.setattr("config.settings.Settings", lambda: FakeSettings())
+    monkeypatch.setattr("src.scheduler.jobs.is_scheduler_enabled", lambda settings: True)
+    monkeypatch.setattr("src.scheduler.jobs.build_scheduler", lambda settings: fake_scheduler)
+    monkeypatch.setattr("src.main.has_configured_dune_queries", lambda settings: True)
+    monkeypatch.setattr("src.scheduler.jobs.core_dune_job", fake_core_dune_job)
+    monkeypatch.setattr("src.main.asyncio.create_task", fake_create_task)
+
+    app = FastAPI()
+
+    async with lifespan(app):
+        assert fake_scheduler.started is True
+        assert created["task_created"] is True
+        assert app.state.dune_sync_task is fake_task
+
+    assert fake_task.cancelled is True

@@ -6,18 +6,22 @@ def test_settings_load_public_source_first_dune_query_id():
         _env_file=None,
         database_url="postgresql+asyncpg://x:y@localhost:5432/mantle_monitor",
         dune_api_key="token",
+        dune_daily_active_users_query_id=1,
+        dune_active_addresses_query_id=2,
+        dune_chain_transactions_query_id=3,
         dune_stablecoin_volume_query_id=4,
     )
 
     assert settings.dune_api_key == "token"
+    assert settings.dune_daily_active_users_query_id == 1
+    assert settings.dune_active_addresses_query_id == 2
+    assert settings.dune_chain_transactions_query_id == 3
     assert settings.dune_stablecoin_volume_query_id == 4
-    assert "dune_daily_active_users_query_id" not in settings.model_fields
-    assert "dune_active_addresses_query_id" not in settings.model_fields
-    assert "dune_chain_transactions_query_id" not in settings.model_fields
-    assert "dune_dex_volume_query_id" not in settings.model_fields
+    assert settings.dune_sync_correction_lookback_days == 2
+    assert settings.dune_sync_chunk_days == 31
 
 
-def test_settings_ignores_legacy_dune_env_keys(tmp_path):
+def test_settings_loads_dune_query_ids_from_env_keys(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text(
         "\n".join(
@@ -36,6 +40,9 @@ def test_settings_ignores_legacy_dune_env_keys(tmp_path):
     settings = Settings(_env_file=env_file)
 
     assert settings.database_url == "postgresql+asyncpg://x:y@localhost:5432/mantle_monitor"
+    assert settings.dune_daily_active_users_query_id == 1
+    assert settings.dune_active_addresses_query_id == 2
+    assert settings.dune_chain_transactions_query_id == 3
     assert settings.dune_stablecoin_volume_query_id == 4
 
 
@@ -69,6 +76,12 @@ def test_settings_defaults():
     assert settings.llm_app_url == "https://github.com/Whisker17/mantle-eco-monitor"
     assert settings.llm_timeout_seconds == 30
     assert settings.dune_api_key == ""
+    assert settings.dune_daily_active_users_query_id == 0
+    assert settings.dune_active_addresses_query_id == 0
+    assert settings.dune_chain_transactions_query_id == 0
+    assert settings.dune_stablecoin_volume_query_id == 0
+    assert settings.dune_sync_correction_lookback_days == 2
+    assert settings.dune_sync_chunk_days == 31
     assert settings.coingecko_api_key == ""
 
 

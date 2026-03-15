@@ -11,8 +11,16 @@ class FakeDuneClient(DuneClient):
         super().__init__(api_key="fake")
         self._results = results
 
-    async def get_latest_result(self, query_id: int) -> list[dict]:
+    async def get_query_result(
+        self,
+        query_id: int,
+        *,
+        params: dict[str, str] | None = None,
+    ) -> list[dict]:
         return self._results.get(query_id, [])
+
+    async def get_latest_result(self, query_id: int) -> list[dict]:
+        return await self.get_query_result(query_id)
 
     async def health_check(self) -> bool:
         return True
@@ -145,9 +153,14 @@ async def test_dune_collector_health_check_uses_configured_query():
             self.health_check_calls = 0
             self.query_ids: list[int] = []
 
-        async def get_latest_result(self, query_id: int) -> list[dict]:
+        async def get_query_result(
+            self,
+            query_id: int,
+            *,
+            params: dict[str, str] | None = None,
+        ) -> list[dict]:
             self.query_ids.append(query_id)
-            return await super().get_latest_result(query_id)
+            return await super().get_query_result(query_id, params=params)
 
         async def health_check(self) -> bool:
             self.health_check_calls += 1
@@ -166,8 +179,48 @@ async def test_dune_collector_health_check_uses_configured_query():
 
 def test_dune_metric_query_map_keeps_only_uncovered_metrics():
     assert METRIC_QUERY_MAP == {
+        "daily_active_users": "dune_daily_active_users_query_id",
+        "active_addresses": "dune_active_addresses_query_id",
+        "chain_transactions": "dune_chain_transactions_query_id",
         "stablecoin_transfer_volume": "dune_stablecoin_volume_query_id",
     }
+
+
+@pytest.mark.asyncio
+async def test_dune_client_executes_parameterized_query_and_fetches_result():
+    seen_requests: list[tuple[str, str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/api/v1/query/42/execute":
+            seen_requests.append((request.method, request.url.path, request.read().decode()))
+            return httpx.Response(200, json={"execution_id": "exec-42", "state": "QUERY_STATE_PENDING"})
+        if request.method == "GET" and request.url.path == "/api/v1/execution/exec-42/status":
+            seen_requests.append((request.method, request.url.path, None))
+            return httpx.Response(
+                200,
+                json={"execution_id": "exec-42", "state": "QUERY_STATE_COMPLETED", "is_execution_finished": True},
+            )
+        if request.method == "GET" and request.url.path == "/api/v1/execution/exec-42/results":
+            seen_requests.append((request.method, request.url.path, None))
+            return httpx.Response(200, json={"result": {"rows": [{"day": "2026-03-01", "value": 1}]}})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    client = DuneClient(
+        api_key="token",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=30.0),
+    )
+
+    rows = await client.get_query_result(
+        42,
+        params={"start_date": "2026-03-01", "end_date": "2026-03-05"},
+    )
+
+    assert rows == [{"day": "2026-03-01", "value": 1}]
+    assert seen_requests == [
+        ("POST", "/api/v1/query/42/execute", '{"query_parameters":{"start_date":"2026-03-01","end_date":"2026-03-05"},"performance":"medium"}'),
+        ("GET", "/api/v1/execution/exec-42/status", None),
+        ("GET", "/api/v1/execution/exec-42/results", None),
+    ]
 
 
 @pytest.mark.asyncio

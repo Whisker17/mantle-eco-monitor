@@ -15,6 +15,7 @@ from src.ingestion.base import BaseCollector
 from src.protocols.base import ProtocolAdapter
 from src.protocols.registry import get_adapter
 from src.rules.engine import AlertCandidate, RuleEngine
+from src.services.dune_sync import DuneSyncService
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,73 @@ async def run_collection_job(
             await insert_source_run(
                 session,
                 source_platform=collector.source_platform,
+                job_name=job_name,
+                status="failed",
+                records_collected=0,
+                error_message=str(exc),
+                latency_ms=int((time.perf_counter() - start) * 1000),
+                started_at=started_at,
+                completed_at=datetime.now(tz=timezone.utc),
+                created_at=datetime.now(tz=timezone.utc),
+            )
+            await session.commit()
+        return JobResult(status="failed", records_collected=0, alerts_created=0, error_message=str(exc))
+
+
+async def run_dune_sync_job(
+    job_name: str,
+    sync_service: DuneSyncService,
+    session_factory: async_sessionmaker[AsyncSession],
+    notification_service=None,
+) -> JobResult:
+    started_at = datetime.now(tz=timezone.utc)
+    start = time.perf_counter()
+
+    try:
+        result = await sync_service.sync_all()
+        alerts = [
+            alert
+            for metric_result in result.metric_results
+            for alert in metric_result.alerts
+        ]
+        status = "failed" if result.failed_metrics else "success"
+        error_message = "; ".join(
+            f"{metric}: {error}" for metric, error in sorted(result.failed_metrics.items())
+        ) or None
+
+        async with session_factory() as session:
+            await insert_source_run(
+                session,
+                source_platform="dune",
+                job_name=job_name,
+                status=status,
+                records_collected=result.records_written,
+                error_message=error_message,
+                latency_ms=int((time.perf_counter() - start) * 1000),
+                started_at=started_at,
+                completed_at=datetime.now(tz=timezone.utc),
+                created_at=datetime.now(tz=timezone.utc),
+            )
+            await session.commit()
+
+        if notification_service is not None and alerts:
+            try:
+                await notification_service.deliver_alerts(alerts)
+            except Exception:
+                logger.exception("Notification delivery failed for job %s", job_name)
+
+        return JobResult(
+            status=status,
+            records_collected=result.records_written,
+            alerts_created=result.alerts_created,
+            error_message=error_message,
+        )
+    except Exception as exc:
+        logger.exception("Dune sync job %s failed", job_name)
+        async with session_factory() as session:
+            await insert_source_run(
+                session,
+                source_platform="dune",
                 job_name=job_name,
                 status="failed",
                 records_collected=0,
