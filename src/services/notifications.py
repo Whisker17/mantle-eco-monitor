@@ -43,6 +43,7 @@ class NotificationService:
         self._lark_client = lark_client or LarkClient(
             app_id=getattr(settings, "lark_app_id", ""),
             app_secret=getattr(settings, "lark_app_secret", ""),
+            base_url=getattr(settings, "lark_base_url", "https://open.larksuite.com"),
         )
 
     async def deliver_alerts(self, alerts: list[AlertEvent]) -> None:

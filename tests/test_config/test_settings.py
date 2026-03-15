@@ -54,6 +54,7 @@ def test_settings_defaults():
     assert settings.scheduler_config_path == "config/scheduler.toml"
     assert settings.lark_app_id == ""
     assert settings.lark_app_secret == ""
+    assert settings.lark_base_url == "https://open.larksuite.com"
     assert settings.lark_verification_token == ""
     assert settings.lark_encrypt_key == ""
     assert settings.lark_environment == "dev"
@@ -91,6 +92,7 @@ def test_settings_allow_lark_and_llm_overrides():
         bot_external_actions_enabled=True,
         lark_app_id="cli_x",
         lark_app_secret="secret_x",
+        lark_base_url="https://open.feishu.cn",
         lark_verification_token="verify_x",
         lark_encrypt_key="encrypt_x",
         lark_environment="prod",
@@ -110,6 +112,7 @@ def test_settings_allow_lark_and_llm_overrides():
     assert settings.bot_external_actions_enabled is True
     assert settings.lark_app_id == "cli_x"
     assert settings.lark_app_secret == "secret_x"
+    assert settings.lark_base_url == "https://open.feishu.cn"
     assert settings.lark_verification_token == "verify_x"
     assert settings.lark_encrypt_key == "encrypt_x"
     assert settings.lark_environment == "prod"

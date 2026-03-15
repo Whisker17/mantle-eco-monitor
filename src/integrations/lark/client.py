@@ -13,7 +13,7 @@ class LarkClient:
         *,
         app_id: str,
         app_secret: str,
-        base_url: str = "https://open.feishu.cn",
+        base_url: str = "https://open.larksuite.com",
         http_client: httpx.AsyncClient | None = None,
     ):
         self._app_id = app_id

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     bot_external_actions_enabled: bool = False
     lark_app_id: str = ""
     lark_app_secret: str = ""
+    lark_base_url: str = "https://open.larksuite.com"
     lark_verification_token: str = ""
     lark_encrypt_key: str = ""
     lark_environment: str = "dev"

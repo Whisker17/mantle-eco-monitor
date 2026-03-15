@@ -16,7 +16,7 @@ from src.db.repositories import (
     mark_delivery_event_failed,
 )
 from src.integrations.lark.client import LarkClient
-from src.integrations.lark.signature import verify_callback_token
+from src.integrations.lark.signature import decrypt_callback_payload, verify_callback_token
 from src.services.bot_query import BotQueryService
 from src.services.llm import LLMClient
 
@@ -42,6 +42,7 @@ def _build_lark_client(settings: Settings):
     return LarkClient(
         app_id=settings.lark_app_id,
         app_secret=settings.lark_app_secret,
+        base_url=settings.lark_base_url,
     )
 
 
@@ -69,12 +70,27 @@ def _extract_message_text(payload: dict[str, Any]) -> str:
     return text
 
 
+def _is_message_addressed_to_bot(payload: dict[str, Any]) -> bool:
+    event = payload.get("event", {})
+    message = event.get("message", {})
+    if message.get("chat_type") == "p2p":
+        return True
+
+    mentions = message.get("mentions")
+    return isinstance(mentions, list) and len(mentions) > 0
+
+
 @lark_router.post("/api/integrations/lark/events")
 async def handle_lark_event(
     payload: dict[str, Any],
     session: AsyncSession = Depends(get_db_session),
 ):
     settings = Settings()
+    try:
+        payload = decrypt_callback_payload(payload, settings.lark_encrypt_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     token = _extract_token(payload)
     if not verify_callback_token(token, settings.lark_verification_token):
         raise HTTPException(status_code=401, detail="Invalid verification token")
@@ -87,6 +103,9 @@ async def handle_lark_event(
 
     if not settings.lark_bot_enabled:
         raise HTTPException(status_code=503, detail="Lark bot is disabled")
+
+    if not _is_message_addressed_to_bot(payload):
+        return {"status": "ignored", "reason": "not_addressed"}
 
     header = payload.get("header", {})
     event_id = header.get("event_id")
