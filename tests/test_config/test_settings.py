@@ -48,5 +48,19 @@ def test_settings_defaults():
     assert settings.ai_enrichment_enabled is False
     assert settings.lark_delivery_enabled is False
     assert settings.scheduler_enabled is True
+    assert settings.scheduler_profile == "prod"
+    assert settings.scheduler_config_path == "config/scheduler.toml"
     assert settings.dune_api_key == ""
     assert settings.coingecko_api_key == ""
+
+
+def test_settings_allow_scheduler_profile_overrides():
+    settings = Settings(
+        _env_file=None,
+        database_url="postgresql+asyncpg://x:y@localhost:5432/mantle_monitor",
+        scheduler_profile="dev_live",
+        scheduler_config_path="/tmp/custom-scheduler.toml",
+    )
+
+    assert settings.scheduler_profile == "dev_live"
+    assert settings.scheduler_config_path == "/tmp/custom-scheduler.toml"

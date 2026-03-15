@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     ai_enrichment_enabled: bool = False
     lark_delivery_enabled: bool = False
     scheduler_enabled: bool = True
+    scheduler_profile: str = "prod"
+    scheduler_config_path: str = "config/scheduler.toml"
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"
