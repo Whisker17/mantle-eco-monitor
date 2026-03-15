@@ -81,6 +81,40 @@ def test_dune_collector_parses_utc_timestamp_strings(fake_dune_client):
     assert records[0].unit == "usd"
 
 
+def test_dune_collector_maps_stablecoin_breakdown_rows_to_token_and_aggregate_metrics(
+    fake_dune_client,
+):
+    collector = DuneCollector(fake_dune_client)
+
+    records = collector._map_rows(
+        metric_name="stablecoin_transfer_volume",
+        rows=[
+            {
+                "day": "2026-03-14 00:00:00.000 UTC",
+                "symbol": "USDT",
+                "volume": 120.5,
+                "tx_count": 7,
+            },
+            {
+                "day": "2026-03-14 00:00:00.000 UTC",
+                "symbol": "USDC",
+                "volume": 30,
+                "tx_count": 2,
+            },
+        ],
+    )
+
+    assert len(records) == 5
+
+    by_key = {(record.entity, record.metric_name): record for record in records}
+
+    assert by_key[("mantle:USDT", "stablecoin_transfer_volume")].value == Decimal("120.5")
+    assert by_key[("mantle:USDT", "stablecoin_transfer_tx_count")].value == Decimal("7")
+    assert by_key[("mantle:USDC", "stablecoin_transfer_volume")].value == Decimal("30")
+    assert by_key[("mantle:USDC", "stablecoin_transfer_tx_count")].value == Decimal("2")
+    assert by_key[("mantle", "stablecoin_transfer_volume")].value == Decimal("150.5")
+
+
 def test_dune_collector_source_platform(fake_dune_client):
     collector = DuneCollector(fake_dune_client)
     assert collector.source_platform == "dune"
@@ -116,7 +150,12 @@ async def test_dune_collector_collects_stablecoin_transfer_volume_when_configure
     client = FakeDuneClient(
         results={
             42: [
-                {"day": "2026-03-13", "value": 1234567.89},
+                {
+                    "day": "2026-03-13",
+                    "symbol": "USDT",
+                    "volume": 1234567.89,
+                    "tx_count": 321,
+                },
             ]
         }
     )
@@ -128,11 +167,13 @@ async def test_dune_collector_collects_stablecoin_transfer_volume_when_configure
 
     records = await collector.collect()
 
-    assert len(records) == 1
-    assert records[0].metric_name == "stablecoin_transfer_volume"
-    assert records[0].value == Decimal("1234567.89")
-    assert records[0].unit == "usd"
-    assert records[0].entity == "mantle"
+    assert len(records) == 3
+
+    by_key = {(record.entity, record.metric_name): record for record in records}
+
+    assert by_key[("mantle:USDT", "stablecoin_transfer_volume")].value == Decimal("1234567.89")
+    assert by_key[("mantle:USDT", "stablecoin_transfer_tx_count")].value == Decimal("321")
+    assert by_key[("mantle", "stablecoin_transfer_volume")].value == Decimal("1234567.89")
 
 
 @pytest.mark.asyncio

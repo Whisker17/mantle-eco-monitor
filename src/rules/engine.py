@@ -47,6 +47,9 @@ class RuleEngine:
         candidates: list[AlertCandidate] = []
 
         for snapshot in current_snapshots:
+            if self._skip_alerts_for_snapshot(snapshot):
+                continue
+
             candidates.extend(await self._check_thresholds(snapshot))
 
             historic_max = await get_comparison_snapshot(
@@ -67,6 +70,15 @@ class RuleEngine:
 
         candidates.extend(check_multi_signal(candidates))
         return await apply_cooldown(candidates, self.session)
+
+    def _skip_alerts_for_snapshot(self, snapshot: MetricSnapshot) -> bool:
+        return (
+            snapshot.entity.startswith("mantle:")
+            and snapshot.metric_name in {
+                "stablecoin_transfer_volume",
+                "stablecoin_transfer_tx_count",
+            }
+        )
 
     async def _check_thresholds(
         self, snapshot: MetricSnapshot

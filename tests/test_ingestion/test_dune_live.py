@@ -50,6 +50,8 @@ async def test_live_dune_stablecoin_transfer_volume():
     records = await collector.collect()
 
     assert records, "expected Dune stablecoin transfer volume query to return at least one row"
-    assert all(record.metric_name == "stablecoin_transfer_volume" for record in records)
-    assert all(record.entity == "mantle" for record in records)
-    assert all(record.unit == "usd" for record in records)
+    metric_names = {record.metric_name for record in records}
+    assert "stablecoin_transfer_volume" in metric_names
+    assert "stablecoin_transfer_tx_count" in metric_names
+    assert any(record.entity == "mantle" for record in records)
+    assert any(record.entity.startswith("mantle:") for record in records)

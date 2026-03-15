@@ -20,6 +20,7 @@ METRIC_UNITS = {
     "active_addresses": "count",
     "chain_transactions": "count",
     "stablecoin_transfer_volume": "usd",
+    "stablecoin_transfer_tx_count": "count",
     "dex_volume": "usd",
 }
 
@@ -83,31 +84,130 @@ class DuneCollector(BaseCollector):
         metric_name: str,
         rows: list[dict],
     ) -> list[MetricRecord]:
+        if metric_name == "stablecoin_transfer_volume":
+            return self._map_stablecoin_rows(rows)
+
         records = []
         unit = METRIC_UNITS.get(metric_name, "count")
         for row in rows:
-            day_raw = row.get("day") or row.get("date")
-            if day_raw is None:
+            collected_at = self._parse_collected_at(row)
+            if collected_at is None:
                 continue
-            if isinstance(day_raw, str):
-                collected_at = _parse_dune_datetime(day_raw)
-            else:
-                collected_at = day_raw
 
             value = Decimal(str(row["value"]))
             records.append(
-                MetricRecord(
-                    scope="core",
+                self._build_record(
                     entity="mantle",
                     metric_name=metric_name,
                     value=value,
                     unit=unit,
-                    source_platform="dune",
-                    source_ref=None,
                     collected_at=collected_at,
                 )
             )
         return records
+
+    def _map_stablecoin_rows(self, rows: list[dict]) -> list[MetricRecord]:
+        if not any("symbol" in row for row in rows):
+            return self._map_single_metric_rows("stablecoin_transfer_volume", rows)
+
+        records: list[MetricRecord] = []
+        totals_by_day: dict[datetime, Decimal] = {}
+
+        for row in rows:
+            collected_at = self._parse_collected_at(row)
+            symbol = row.get("symbol")
+            if collected_at is None or not symbol:
+                continue
+
+            entity = f"mantle:{str(symbol).upper()}"
+            volume = Decimal(str(row["volume"]))
+            tx_count = Decimal(str(row["tx_count"]))
+
+            records.append(
+                self._build_record(
+                    entity=entity,
+                    metric_name="stablecoin_transfer_volume",
+                    value=volume,
+                    unit="usd",
+                    collected_at=collected_at,
+                )
+            )
+            records.append(
+                self._build_record(
+                    entity=entity,
+                    metric_name="stablecoin_transfer_tx_count",
+                    value=tx_count,
+                    unit="count",
+                    collected_at=collected_at,
+                )
+            )
+            totals_by_day[collected_at] = totals_by_day.get(collected_at, Decimal("0")) + volume
+
+        for collected_at, total_volume in sorted(totals_by_day.items(), reverse=True):
+            records.append(
+                self._build_record(
+                    entity="mantle",
+                    metric_name="stablecoin_transfer_volume",
+                    value=total_volume,
+                    unit="usd",
+                    collected_at=collected_at,
+                )
+            )
+
+        return records
+
+    def _map_single_metric_rows(
+        self,
+        metric_name: str,
+        rows: list[dict],
+    ) -> list[MetricRecord]:
+        records: list[MetricRecord] = []
+        unit = METRIC_UNITS.get(metric_name, "count")
+
+        for row in rows:
+            collected_at = self._parse_collected_at(row)
+            if collected_at is None:
+                continue
+
+            records.append(
+                self._build_record(
+                    entity="mantle",
+                    metric_name=metric_name,
+                    value=Decimal(str(row["value"])),
+                    unit=unit,
+                    collected_at=collected_at,
+                )
+            )
+
+        return records
+
+    def _parse_collected_at(self, row: dict) -> datetime | None:
+        day_raw = row.get("day") or row.get("date")
+        if day_raw is None:
+            return None
+        if isinstance(day_raw, str):
+            return _parse_dune_datetime(day_raw)
+        return day_raw
+
+    def _build_record(
+        self,
+        *,
+        entity: str,
+        metric_name: str,
+        value: Decimal,
+        unit: str,
+        collected_at: datetime,
+    ) -> MetricRecord:
+        return MetricRecord(
+            scope="core",
+            entity=entity,
+            metric_name=metric_name,
+            value=value,
+            unit=unit,
+            source_platform="dune",
+            source_ref=None,
+            collected_at=collected_at,
+        )
 
     async def collect(self) -> list[MetricRecord]:
         records: list[MetricRecord] = []

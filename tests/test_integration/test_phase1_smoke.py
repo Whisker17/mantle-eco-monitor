@@ -114,6 +114,77 @@ async def test_metrics_endpoint_works_empty(test_app):
 
 
 @pytest.mark.asyncio
+async def test_rule_engine_skips_token_level_stablecoin_breakdown_alerts(
+    test_session_factory,
+):
+    now = datetime.now(tz=timezone.utc)
+
+    async with test_session_factory() as session:
+        old_records = [
+            MetricRecord(
+                scope="core",
+                entity="mantle:USDT",
+                metric_name="stablecoin_transfer_volume",
+                value=Decimal("1000000"),
+                unit="usd",
+                source_platform="dune",
+                source_ref=None,
+                collected_at=now - timedelta(days=8),
+            ),
+            MetricRecord(
+                scope="core",
+                entity="mantle:USDT",
+                metric_name="stablecoin_transfer_tx_count",
+                value=Decimal("100"),
+                unit="count",
+                source_platform="dune",
+                source_ref=None,
+                collected_at=now - timedelta(days=8),
+            ),
+        ]
+        await insert_snapshots(session, old_records)
+        await session.commit()
+
+    async with test_session_factory() as session:
+        current_records = [
+            MetricRecord(
+                scope="core",
+                entity="mantle:USDT",
+                metric_name="stablecoin_transfer_volume",
+                value=Decimal("1500000"),
+                unit="usd",
+                source_platform="dune",
+                source_ref=None,
+                collected_at=now,
+            ),
+            MetricRecord(
+                scope="core",
+                entity="mantle:USDT",
+                metric_name="stablecoin_transfer_tx_count",
+                value=Decimal("150"),
+                unit="count",
+                source_platform="dune",
+                source_ref=None,
+                collected_at=now,
+            ),
+        ]
+        await insert_snapshots(session, current_records)
+        await session.commit()
+
+    async with test_session_factory() as session:
+        from sqlalchemy import select
+
+        result = await session.execute(
+            select(MetricSnapshot).where(MetricSnapshot.collected_at == now)
+        )
+        current_snapshots = list(result.scalars().all())
+
+        candidates = await RuleEngine(session).evaluate(current_snapshots)
+
+        assert candidates == []
+
+
+@pytest.mark.asyncio
 async def test_watchlist_refresh_seeds_data(test_app):
     response = test_app.post("/api/watchlist/refresh")
     assert response.status_code == 200
