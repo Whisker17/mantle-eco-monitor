@@ -151,6 +151,14 @@ def load_scheduler_profile(
     return profile_name, profile
 
 
+def is_scheduler_enabled(settings: Settings) -> bool:
+    if not settings.scheduler_enabled:
+        return False
+
+    _, profile = load_scheduler_profile(settings)
+    return profile.get("scheduler_enabled", True)
+
+
 def _build_trigger(job_id: str, job_config: dict[str, Any], timezone: str | None):
     mode = job_config.get("mode")
     if mode == "cron":

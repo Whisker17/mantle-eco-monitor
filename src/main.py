@@ -11,13 +11,12 @@ from src.api.routes.watchlist import watchlist_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from config.settings import Settings
+    from src.scheduler.jobs import build_scheduler, is_scheduler_enabled
 
     settings = Settings()
 
-    if settings.scheduler_enabled:
-        from src.scheduler.jobs import build_scheduler
-
-        scheduler = build_scheduler()
+    if is_scheduler_enabled(settings):
+        scheduler = build_scheduler(settings)
         scheduler.__enter__()
         scheduler.start_in_background()
         app.state.scheduler = scheduler

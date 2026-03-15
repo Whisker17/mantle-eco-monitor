@@ -39,7 +39,8 @@ async def test_lifespan_waits_for_scheduler_shutdown(monkeypatch):
         scheduler_enabled = True
 
     monkeypatch.setattr("config.settings.Settings", lambda: FakeSettings())
-    monkeypatch.setattr("src.scheduler.jobs.build_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr("src.scheduler.jobs.is_scheduler_enabled", lambda settings: True)
+    monkeypatch.setattr("src.scheduler.jobs.build_scheduler", lambda settings: fake_scheduler)
 
     app = FastAPI()
 
@@ -50,3 +51,22 @@ async def test_lifespan_waits_for_scheduler_shutdown(monkeypatch):
     assert fake_scheduler.stopped is True
     assert fake_scheduler.waited is True
     assert fake_scheduler.exited is True
+
+
+@pytest.mark.asyncio
+async def test_lifespan_skips_scheduler_when_profile_disables_it(monkeypatch):
+    class FakeSettings:
+        scheduler_enabled = True
+
+    monkeypatch.setattr("config.settings.Settings", lambda: FakeSettings())
+    monkeypatch.setattr("src.scheduler.jobs.is_scheduler_enabled", lambda settings: False)
+
+    def fail_build_scheduler():
+        raise AssertionError("build_scheduler should not be called when profile disables scheduling")
+
+    monkeypatch.setattr("src.scheduler.jobs.build_scheduler", fail_build_scheduler)
+
+    app = FastAPI()
+
+    async with lifespan(app):
+        assert hasattr(app.state, "scheduler") is False
