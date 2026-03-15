@@ -1,9 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 import json
 
-from sqlalchemy import Boolean, DateTime, Index, Integer, Numeric, Text, TypeDecorator
+from sqlalchemy import Boolean, Date, DateTime, Index, Integer, Numeric, Text, TypeDecorator, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -51,13 +51,53 @@ class MetricSnapshot(Base):
     source_platform: Mapped[str] = mapped_column(Text, nullable=False)
     source_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    collected_day: Mapped[date] = mapped_column(Date, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default="now()"
     )
 
     __table_args__ = (
+        UniqueConstraint("scope", "entity", "metric_name", "collected_day", name="uq_metric_snapshots_daily"),
         Index("idx_snapshots_lookup", "entity", "metric_name", collected_at.desc()),
         Index("idx_snapshots_scope_time", "scope", collected_at.desc()),
+    )
+
+
+class MetricSyncState(Base):
+    __tablename__ = "metric_sync_states"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    source_platform: Mapped[str] = mapped_column(Text, nullable=False)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    entity: Mapped[str] = mapped_column(Text, nullable=False)
+    metric_name: Mapped[str] = mapped_column(Text, nullable=False)
+    last_synced_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    last_backfilled_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    backfill_status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    last_sync_status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="now()"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default="now()"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "source_platform",
+            "scope",
+            "entity",
+            "metric_name",
+            name="uq_metric_sync_states_key",
+        ),
+        Index(
+            "idx_metric_sync_states_lookup",
+            "source_platform",
+            "scope",
+            "entity",
+            "metric_name",
+        ),
     )
 
 

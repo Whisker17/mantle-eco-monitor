@@ -23,6 +23,7 @@ def test_alembic_upgrade_supports_async_sqlalchemy_urls(tmp_path):
 
     assert {
         "metric_snapshots",
+        "metric_sync_states",
         "alert_events",
         "delivery_events",
         "watchlist_protocols",
