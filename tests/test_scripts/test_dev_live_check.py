@@ -42,6 +42,108 @@ def is_pid_alive(pid: int) -> bool:
     return True
 
 
+def make_fake_curl(
+    tmp_path: Path,
+    *,
+    health_json: str | None = None,
+    sources_json: str | None = None,
+    mnt_metric_json: str | None = None,
+    tvs_metric_json: str | None = None,
+) -> Path:
+    files: dict[str, str] = {}
+    for name, payload in {
+        "health": health_json,
+        "sources": sources_json,
+        "mnt": mnt_metric_json,
+        "tvs": tvs_metric_json,
+    }.items():
+        if payload is None:
+            continue
+        path = tmp_path / f"{name}.json"
+        path.write_text(payload, encoding="utf-8")
+        files[name] = str(path)
+
+    lines = [
+        "#!/usr/bin/env bash",
+        'url="${@: -1}"',
+        'case "$url" in',
+    ]
+    if "sources" in files:
+        lines.extend(
+            [
+                '  *"/api/health/sources"*)',
+                f'    cat "{files["sources"]}"',
+                "    ;;",
+            ]
+        )
+    if "health" in files:
+        lines.extend(
+            [
+                '  *"/api/health")',
+                f'    cat "{files["health"]}"',
+                "    ;;",
+            ]
+        )
+    if "mnt" in files:
+        lines.extend(
+            [
+                '  *"metric_name=mnt_volume"*)',
+                f'    cat "{files["mnt"]}"',
+                "    ;;",
+            ]
+        )
+    if "tvs" in files:
+        lines.extend(
+            [
+                '  *"metric_name=total_value_secured"*)',
+                f'    cat "{files["tvs"]}"',
+                "    ;;",
+            ]
+        )
+    lines.extend(
+        [
+            '  *)',
+            '    echo "unexpected url: $url" >&2',
+            "    exit 6",
+            "    ;;",
+            "esac",
+        ]
+    )
+
+    return make_executable(tmp_path / "fake-curl.sh", "\n".join(lines) + "\n")
+
+
+def make_fake_python(tmp_path: Path) -> Path:
+    shim = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            'if [ "${1:-}" = "-m" ] && [ "${2:-}" = "src.scheduler" ] && [ "${3:-}" = "run" ]; then',
+            '  job="${4:-}"',
+            '  case "$job" in',
+            '    source_health)',
+            '      if [ -n "${FAKE_SOURCE_HEALTH_STDOUT:-}" ]; then printf "%s\\n" "${FAKE_SOURCE_HEALTH_STDOUT}"; fi',
+            '      exit "${FAKE_SOURCE_HEALTH_EXIT_CODE:-0}"',
+            '      ;;',
+            '    core_coingecko)',
+            '      if [ -n "${FAKE_COINGECKO_STDOUT:-}" ]; then printf "%s\\n" "${FAKE_COINGECKO_STDOUT}"; fi',
+            '      exit "${FAKE_COINGECKO_EXIT_CODE:-0}"',
+            '      ;;',
+            '    core_l2beat)',
+            '      if [ -n "${FAKE_L2BEAT_STDOUT:-}" ]; then printf "%s\\n" "${FAKE_L2BEAT_STDOUT}"; fi',
+            '      exit "${FAKE_L2BEAT_EXIT_CODE:-0}"',
+            '      ;;',
+            '    *)',
+            '      echo "unexpected scheduler job: ${job}" >&2',
+            '      exit 9',
+            '      ;;',
+            '  esac',
+            'fi',
+            'exec "${REAL_PYTHON}" "$@"',
+        ]
+    )
+    return make_executable(tmp_path / "fake-python.sh", shim + "\n")
+
+
 def test_up_exits_with_code_1_when_database_url_is_missing(tmp_path):
     fake_uvicorn = make_executable(
         tmp_path / "fake-uvicorn.sh",
@@ -184,3 +286,64 @@ def test_down_stops_managed_process_and_removes_pid_file(tmp_path):
         time.sleep(0.1)
 
     assert is_pid_alive(pid) is False
+
+
+def test_check_returns_code_3_when_source_health_job_fails(tmp_path):
+    fake_curl = make_fake_curl(
+        tmp_path,
+        health_json='{"status":"healthy","db":"connected","next_scheduled_run":"soon","last_source_runs":{}}',
+    )
+    fake_python = make_fake_python(tmp_path)
+
+    result = run_script(
+        "check",
+        env={
+            "DATABASE_URL": "sqlite+aiosqlite:///./test.db",
+            "CURL_BIN": str(fake_curl),
+            "PYTHON_BIN": str(fake_python),
+            "REAL_PYTHON": sys.executable,
+            "FAKE_SOURCE_HEALTH_EXIT_CODE": "9",
+        },
+    )
+
+    assert result.returncode == 3
+    assert "source_health" in (result.stdout + result.stderr)
+
+
+def test_check_prints_summary_for_successful_health_and_source_jobs(tmp_path):
+    fake_curl = make_fake_curl(
+        tmp_path,
+        health_json=(
+            '{"status":"healthy","db":"connected","next_scheduled_run":"2026-03-15T14:02:00+08:00",'
+            '"last_source_runs":{"coingecko":{"status":"success","at":"now"}}}'
+        ),
+        sources_json=(
+            '{"runs":['
+            '{"source_platform":"coingecko","status":"success","started_at":"now","id":1,"job_name":"core_coingecko","records_collected":1,"error_message":null,"latency_ms":10},'
+            '{"source_platform":"l2beat","status":"success","started_at":"now","id":2,"job_name":"core_l2beat","records_collected":1,"error_message":null,"latency_ms":10}'
+            ']}'
+        ),
+    )
+    fake_python = make_fake_python(tmp_path)
+
+    result = run_script(
+        "check",
+        env={
+            "DATABASE_URL": "sqlite+aiosqlite:///./test.db",
+            "CURL_BIN": str(fake_curl),
+            "PYTHON_BIN": str(fake_python),
+            "REAL_PYTHON": sys.executable,
+            "FAKE_SOURCE_HEALTH_STDOUT": "{'defillama': 'success'}",
+            "FAKE_COINGECKO_STDOUT": "{'status': 'ok'}",
+            "FAKE_L2BEAT_STDOUT": "{'status': 'ok'}",
+        },
+    )
+
+    assert result.returncode == 0
+    output = result.stdout + result.stderr
+    assert "Health" in output
+    assert "Source Jobs" in output
+    assert "service=up" in output
+    assert "db=connected" in output
+    assert "coingecko=success" in output
+    assert "l2beat=success" in output

@@ -13,6 +13,7 @@ UVICORN_BIN="${UVICORN_BIN:-uvicorn}"
 PID_FILE="${TMP_DIR}/dev_live.pid"
 LOG_FILE="${TMP_DIR}/dev_live.log"
 HEALTH_URL="http://${APP_HOST}:${APP_PORT}/api/health"
+SOURCES_URL="http://${APP_HOST}:${APP_PORT}/api/health/sources"
 
 
 usage() {
@@ -41,6 +42,43 @@ require_env() {
 
 ensure_tmp_dir() {
   mkdir -p "${TMP_DIR}"
+}
+
+
+fetch_json() {
+  local url="$1"
+  "${CURL_BIN}" --silent --show-error --fail --max-time 2 "${url}"
+}
+
+
+parse_health_summary() {
+  local payload="$1"
+  "${PYTHON_BIN}" - "${payload}" <<'PY'
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+print(data.get("status", "unknown"))
+print(data.get("db", "unknown"))
+print(data.get("next_scheduled_run") or "none")
+PY
+}
+
+
+summarize_sources() {
+  local payload="$1"
+  "${PYTHON_BIN}" - "${payload}" <<'PY'
+import json
+import sys
+
+runs = json.loads(sys.argv[1]).get("runs", [])
+latest = {}
+for run in runs:
+    latest.setdefault(run.get("source_platform", "unknown"), run.get("status", "unknown"))
+
+for source_platform in sorted(latest):
+    print(f"{source_platform}={latest[source_platform]}")
+PY
 }
 
 
@@ -100,6 +138,24 @@ stop_server() {
 }
 
 
+run_scheduler_job() {
+  local job_id="$1"
+  local output
+
+  if ! output="$(DATABASE_URL="${DATABASE_URL}" SCHEDULER_PROFILE="${SCHEDULER_PROFILE}" "${PYTHON_BIN}" -m src.scheduler run "${job_id}" 2>&1)"; then
+    echo "Manual scheduler job failed: ${job_id}" >&2
+    if [ -n "${output}" ]; then
+      echo "${output}" >&2
+    fi
+    return 1
+  fi
+
+  if [ -n "${output}" ]; then
+    echo "${output}"
+  fi
+}
+
+
 command_up() {
   require_env DATABASE_URL || return 1
   ensure_tmp_dir
@@ -109,10 +165,48 @@ command_up() {
 
 
 command_check() {
-  if ! "${CURL_BIN}" --silent --show-error --fail --max-time 2 "${HEALTH_URL}" >/dev/null 2>&1; then
+  local health_json
+  if ! health_json="$(fetch_json "${HEALTH_URL}")"; then
     echo "Failed to reach ${HEALTH_URL}" >&2
     return 2
   fi
+
+  echo "Health"
+  local health_summary
+  health_summary="$(parse_health_summary "${health_json}")"
+  local health_status
+  local db_status
+  local next_run
+  health_status="$(printf '%s\n' "${health_summary}" | sed -n '1p')"
+  db_status="$(printf '%s\n' "${health_summary}" | sed -n '2p')"
+  next_run="$(printf '%s\n' "${health_summary}" | sed -n '3p')"
+
+  echo "status=${health_status}"
+  echo "db=${db_status}"
+  echo "next_run=${next_run}"
+
+  echo "Source Jobs"
+  for job_id in source_health core_coingecko core_l2beat; do
+    echo "running=${job_id}"
+    if ! run_scheduler_job "${job_id}"; then
+      return 3
+    fi
+  done
+
+  local sources_json
+  if ! sources_json="$(fetch_json "${SOURCES_URL}")"; then
+    echo "Failed to reach ${SOURCES_URL}" >&2
+    return 2
+  fi
+
+  echo "Summary"
+  echo "service=up"
+  echo "health=${health_status}"
+  echo "db=${db_status}"
+  echo "next_run=${next_run}"
+  while IFS= read -r line; do
+    [ -n "${line}" ] && echo "${line}"
+  done < <(summarize_sources "${sources_json}")
 
   return 0
 }
