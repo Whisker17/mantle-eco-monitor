@@ -6,7 +6,8 @@ Last updated: 2026-03-15
 
 - Current product stage: Phase 1 runtime implementation is functionally complete.
 - Current integration status:
-  - `main` includes the runtime collection pipeline, scheduler profiles, and local `dev_live` smoke-check tooling.
+  - `main` includes the runtime collection pipeline, scheduler profiles, stablecoin transfer breakdown snapshots, manual scheduler dispatch, and local `dev_live` smoke-check tooling.
+  - `main` is currently the only local branch; there is no outstanding feature branch waiting to be merged.
   - Local development can validate source reachability and key metric ingestion with `./scripts/dev_live_check.sh`.
   - Production deployment and production observation are still pending.
 - Most important current objective: deploy against PostgreSQL and validate the first real scheduler cycles.
@@ -53,7 +54,7 @@ Last updated: 2026-03-15
 - [x] Scheduler supports `prod`, `dev_live`, and `ci` profiles.
 - [x] Local manual scheduler dispatch exists for targeted job execution.
 - [x] Scheduler shutdown no longer throws the APScheduler context cleanup error in lifespan tests.
-- [x] Full automated test suite passes on the current branch.
+- [x] Full automated test suite passes on `main` (`141 passed, 2 skipped` in the latest local verification).
 - [x] Local `dev_live` smoke check script exists for startup and availability verification.
 - [x] Runtime work merged back to `main`.
 - [ ] Production deployment completed on server.
