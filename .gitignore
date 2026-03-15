@@ -17,6 +17,7 @@ env/
 .ruff_cache/
 htmlcov/
 .coverage
+.tmp/
 .worktrees/
 
 *.db
