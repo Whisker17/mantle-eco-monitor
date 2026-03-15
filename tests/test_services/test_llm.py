@@ -15,6 +15,8 @@ async def test_llm_client_posts_openai_compatible_chat_completion_request():
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
         captured["auth"] = request.headers.get("Authorization")
+        captured["referer"] = request.headers.get("HTTP-Referer")
+        captured["title"] = request.headers.get("X-Title")
         captured["body"] = json.loads(request.content.decode("utf-8"))
         return httpx.Response(
             200,
@@ -33,6 +35,8 @@ async def test_llm_client_posts_openai_compatible_chat_completion_request():
         api_base="https://llm.example.com/v1",
         api_key="secret-key",
         model="gpt-x",
+        app_name="mantle-eco-monitor",
+        app_url="https://github.com/Whisker17/mantle-eco-monitor",
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
 
@@ -46,6 +50,8 @@ async def test_llm_client_posts_openai_compatible_chat_completion_request():
     assert result == "hello from llm"
     assert captured["url"] == "https://llm.example.com/v1/chat/completions"
     assert captured["auth"] == "Bearer secret-key"
+    assert captured["referer"] == "https://github.com/Whisker17/mantle-eco-monitor"
+    assert captured["title"] == "mantle-eco-monitor"
     assert captured["body"] == {
         "model": "gpt-x",
         "messages": [

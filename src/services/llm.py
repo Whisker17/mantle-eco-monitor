@@ -12,12 +12,16 @@ class LLMClient:
         api_base: str,
         api_key: str,
         model: str,
+        app_name: str,
+        app_url: str,
         timeout_seconds: int = 30,
         http_client: httpx.AsyncClient | None = None,
     ):
         self._api_base = api_base.rstrip("/")
         self._api_key = api_key
         self._model = model
+        self._app_name = app_name
+        self._app_url = app_url
         self._timeout_seconds = timeout_seconds
         self._http_client = http_client
 
@@ -27,7 +31,11 @@ class LLMClient:
         try:
             response = await client.post(
                 f"{self._api_base}/chat/completions",
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "HTTP-Referer": self._app_url,
+                    "X-Title": self._app_name,
+                },
                 json={
                     "model": self._model,
                     "messages": messages,
