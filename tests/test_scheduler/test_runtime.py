@@ -307,3 +307,75 @@ async def test_run_collection_job_persists_dune_stablecoin_transfer_volume(sessi
     assert len(runs) == 1
     assert runs[0].source_platform == "dune"
     assert runs[0].status == "success"
+
+
+@pytest.mark.asyncio
+async def test_run_collection_job_attempts_notification_after_commit_and_ignores_delivery_failure(
+    session_factory,
+):
+    now = datetime.now(tz=timezone.utc)
+
+    async with session_factory() as session:
+        session.add(
+            MetricSnapshot(
+                scope="core",
+                entity="mantle",
+                metric_name="tvl",
+                value=Decimal("1000000000"),
+                unit="usd",
+                source_platform="defillama",
+                source_ref="https://defillama.com/chain/Mantle",
+                collected_at=now - timedelta(days=8),
+                created_at=now,
+            )
+        )
+        await session.commit()
+
+    class FailingNotificationService:
+        def __init__(self):
+            self.called = False
+            self.visible_alert_count = 0
+
+        async def deliver_alerts(self, alerts):
+            self.called = True
+            async with session_factory() as session:
+                self.visible_alert_count = len(
+                    (await session.execute(select(AlertEvent))).scalars().all()
+                )
+            raise RuntimeError("notify boom")
+
+    notification_service = FailingNotificationService()
+    collector = FakeCollector(
+        source_platform="defillama",
+        records=[
+            MetricRecord(
+                scope="core",
+                entity="mantle",
+                metric_name="tvl",
+                value=Decimal("1300000000"),
+                unit="usd",
+                source_platform="defillama",
+                source_ref="https://defillama.com/chain/Mantle",
+                collected_at=now,
+            )
+        ],
+    )
+
+    result = await run_collection_job(
+        "core_defillama",
+        collector,
+        session_factory,
+        notification_service=notification_service,
+    )
+
+    async with session_factory() as session:
+        alerts = (await session.execute(select(AlertEvent))).scalars().all()
+        runs = (await session.execute(select(SourceRun))).scalars().all()
+
+    assert result.status == "success"
+    assert result.alerts_created >= 1
+    assert notification_service.called is True
+    assert notification_service.visible_alert_count >= 1
+    assert len(alerts) >= 1
+    assert len(runs) == 1
+    assert runs[0].status == "success"

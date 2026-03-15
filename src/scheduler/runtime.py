@@ -61,8 +61,10 @@ class ProtocolAdapterCollector(BaseCollector):
 
 async def _persist_alerts(session: AsyncSession, candidates: list[AlertCandidate]) -> int:
     now = datetime.now(tz=timezone.utc)
+    inserted = []
     for candidate in candidates:
-        await insert_alert(
+        inserted.append(
+            await insert_alert(
             session,
             scope=candidate.scope,
             entity=candidate.entity,
@@ -85,7 +87,8 @@ async def _persist_alerts(session: AsyncSession, candidates: list[AlertCandidate
             ai_eligible=False,
             created_at=now,
         )
-    return len(candidates)
+        )
+    return inserted
 
 
 def _latest_snapshots(snapshots):
@@ -101,16 +104,19 @@ async def run_collection_job(
     job_name: str,
     collector: BaseCollector,
     session_factory: async_sessionmaker[AsyncSession],
+    notification_service=None,
 ) -> JobResult:
     started_at = datetime.now(tz=timezone.utc)
     start = time.perf_counter()
 
     try:
         records = await collector.collect()
+        alerts = []
         async with session_factory() as session:
             inserted = await insert_snapshots(session, records)
             candidates = await RuleEngine(session).evaluate(_latest_snapshots(inserted))
-            alert_count = await _persist_alerts(session, candidates)
+            alerts = await _persist_alerts(session, candidates)
+            alert_count = len(alerts)
             await insert_source_run(
                 session,
                 source_platform=collector.source_platform,
@@ -123,6 +129,11 @@ async def run_collection_job(
                 created_at=datetime.now(tz=timezone.utc),
             )
             await session.commit()
+        if notification_service is not None and alerts:
+            try:
+                await notification_service.deliver_alerts(alerts)
+            except Exception:
+                logger.exception("Notification delivery failed for job %s", job_name)
         return JobResult(status="success", records_collected=len(inserted), alerts_created=alert_count)
     except Exception as exc:
         logger.exception("Collection job %s failed", job_name)

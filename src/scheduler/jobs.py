@@ -25,6 +25,7 @@ from src.scheduler.runtime import (
     run_collection_job,
     run_source_health_job,
 )
+from src.services.notifications import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -35,29 +36,53 @@ def _get_runtime_dependencies():
     return settings, session_factory
 
 
+def _get_notification_service(settings: Settings, session_factory):
+    return NotificationService(settings=settings, session_factory=session_factory)
+
+
 async def core_defillama_job():
     logger.info("Running core_defillama collection")
-    _, session_factory = _get_runtime_dependencies()
-    return await run_collection_job("core_defillama", DefiLlamaCollector(), session_factory)
+    settings, session_factory = _get_runtime_dependencies()
+    return await run_collection_job(
+        "core_defillama",
+        DefiLlamaCollector(),
+        session_factory,
+        notification_service=_get_notification_service(settings, session_factory),
+    )
 
 
 async def core_growthepie_job():
     logger.info("Running core_growthepie collection")
-    _, session_factory = _get_runtime_dependencies()
-    return await run_collection_job("core_growthepie", GrowthepieCollector(), session_factory)
+    settings, session_factory = _get_runtime_dependencies()
+    return await run_collection_job(
+        "core_growthepie",
+        GrowthepieCollector(),
+        session_factory,
+        notification_service=_get_notification_service(settings, session_factory),
+    )
 
 
 async def core_dune_job():
     logger.info("Running core_dune collection")
     settings, session_factory = _get_runtime_dependencies()
     collector = DuneCollector(DuneClient(settings.dune_api_key), settings)
-    return await run_collection_job("core_dune", collector, session_factory)
+    return await run_collection_job(
+        "core_dune",
+        collector,
+        session_factory,
+        notification_service=_get_notification_service(settings, session_factory),
+    )
 
 
 async def core_l2beat_job():
     logger.info("Running core_l2beat collection")
-    _, session_factory = _get_runtime_dependencies()
-    return await run_collection_job("core_l2beat", L2BeatCollector(), session_factory)
+    settings, session_factory = _get_runtime_dependencies()
+    return await run_collection_job(
+        "core_l2beat",
+        L2BeatCollector(),
+        session_factory,
+        notification_service=_get_notification_service(settings, session_factory),
+    )
 
 
 async def core_coingecko_job():
@@ -67,12 +92,13 @@ async def core_coingecko_job():
         "core_coingecko",
         CoinGeckoCollector(api_key=settings.coingecko_api_key),
         session_factory,
+        notification_service=_get_notification_service(settings, session_factory),
     )
 
 
 async def eco_protocols_job():
     logger.info("Running eco_protocols collection")
-    _, session_factory = _get_runtime_dependencies()
+    settings, session_factory = _get_runtime_dependencies()
     adapters = await get_active_protocol_adapters(session_factory)
     if not adapters:
         await refresh_watchlist(session_factory, WatchlistManager())
@@ -81,16 +107,18 @@ async def eco_protocols_job():
         "eco_protocols",
         ProtocolAdapterCollector(adapters),
         session_factory,
+        notification_service=_get_notification_service(settings, session_factory),
     )
 
 
 async def eco_aave_job():
     logger.info("Running eco_aave collection")
-    _, session_factory = _get_runtime_dependencies()
+    settings, session_factory = _get_runtime_dependencies()
     return await run_collection_job(
         "eco_aave",
         ProtocolAdapterCollector([AaveAdapter()]),
         session_factory,
+        notification_service=_get_notification_service(settings, session_factory),
     )
 
 
