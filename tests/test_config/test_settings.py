@@ -60,9 +60,11 @@ def test_settings_defaults():
     assert settings.lark_alert_chat_id_prod == ""
     assert settings.lark_summary_chat_id_dev == ""
     assert settings.lark_summary_chat_id_prod == ""
-    assert settings.llm_api_base == ""
+    assert settings.llm_api_base == "https://openrouter.ai/api/v1"
     assert settings.llm_api_key == ""
-    assert settings.llm_model == ""
+    assert settings.llm_model == "nvidia/nemotron-3-super-120b-a12b:free"
+    assert settings.llm_app_name == "mantle-eco-monitor"
+    assert settings.llm_app_url == "https://github.com/Whisker17/mantle-eco-monitor"
     assert settings.llm_timeout_seconds == 30
     assert settings.dune_api_key == ""
     assert settings.coingecko_api_key == ""
@@ -94,9 +96,11 @@ def test_settings_allow_lark_and_llm_overrides():
         lark_alert_chat_id_prod="chat_prod_alert",
         lark_summary_chat_id_dev="chat_dev_summary",
         lark_summary_chat_id_prod="chat_prod_summary",
-        llm_api_base="https://llm.example.com/v1",
+        llm_api_base="https://openrouter.ai/api/v1",
         llm_api_key="key_x",
-        llm_model="gpt-x",
+        llm_model="nvidia/nemotron-3-super-120b-a12b:free",
+        llm_app_name="mantle-openrouter",
+        llm_app_url="https://example.com/mantle-openrouter",
         llm_timeout_seconds=45,
     )
 
@@ -110,7 +114,9 @@ def test_settings_allow_lark_and_llm_overrides():
     assert settings.lark_alert_chat_id_prod == "chat_prod_alert"
     assert settings.lark_summary_chat_id_dev == "chat_dev_summary"
     assert settings.lark_summary_chat_id_prod == "chat_prod_summary"
-    assert settings.llm_api_base == "https://llm.example.com/v1"
+    assert settings.llm_api_base == "https://openrouter.ai/api/v1"
     assert settings.llm_api_key == "key_x"
-    assert settings.llm_model == "gpt-x"
+    assert settings.llm_model == "nvidia/nemotron-3-super-120b-a12b:free"
+    assert settings.llm_app_name == "mantle-openrouter"
+    assert settings.llm_app_url == "https://example.com/mantle-openrouter"
     assert settings.llm_timeout_seconds == 45
