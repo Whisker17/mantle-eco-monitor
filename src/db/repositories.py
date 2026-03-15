@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
+import json
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,22 @@ class TimeWindow(str, Enum):
     Y1 = "1y"
     ALL_TIME = "all_time"
     ATH = "ath"
+
+
+def _normalize_watchlist_metrics(metrics: list[str] | str | None) -> list[str]:
+    if metrics is None:
+        return ["tvl"]
+
+    if isinstance(metrics, str):
+        try:
+            decoded = json.loads(metrics)
+        except json.JSONDecodeError:
+            return [metrics]
+        if isinstance(decoded, list):
+            return [str(item) for item in decoded]
+        return [str(decoded)]
+
+    return [str(item) for item in metrics]
 
 
 async def insert_snapshots(
@@ -126,15 +143,12 @@ async def upsert_watchlist(
 ) -> list[WatchlistProtocol]:
     result: list[WatchlistProtocol] = []
     for entry in entries:
+        metrics_val = _normalize_watchlist_metrics(entry.get("metrics"))
         existing = await session.execute(
             select(WatchlistProtocol).where(WatchlistProtocol.slug == entry["slug"])
         )
         proto = existing.scalar_one_or_none()
         if proto is None:
-            import json
-            metrics_val = entry.get("metrics", ["tvl"])
-            if isinstance(metrics_val, list):
-                metrics_val = json.dumps(metrics_val)
             proto = WatchlistProtocol(
                 slug=entry["slug"],
                 display_name=entry.get("display_name", entry["slug"]),
@@ -150,6 +164,9 @@ async def upsert_watchlist(
         else:
             proto.display_name = entry.get("display_name", proto.display_name)
             proto.category = entry.get("category", proto.category)
+            proto.monitoring_tier = entry.get("tier", proto.monitoring_tier)
+            proto.is_pinned = entry.get("pinned", proto.is_pinned)
+            proto.metrics = metrics_val
             proto.active = True
             proto.updated_at = datetime.now(tz=timezone.utc)
         result.append(proto)

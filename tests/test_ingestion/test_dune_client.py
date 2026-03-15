@@ -126,6 +126,44 @@ async def test_dune_collector_health_check(fake_dune_client):
     assert await collector.health_check() is True
 
 
+@pytest.mark.asyncio
+async def test_dune_collector_health_check_uses_configured_query():
+    class ProbeDuneClient(FakeDuneClient):
+        def __init__(self):
+            super().__init__(
+                results={
+                    42: [
+                        {
+                            "day": "2026-03-13",
+                            "symbol": "USDT",
+                            "volume": 123.45,
+                            "tx_count": 10,
+                        }
+                    ]
+                }
+            )
+            self.health_check_calls = 0
+            self.query_ids: list[int] = []
+
+        async def get_latest_result(self, query_id: int) -> list[dict]:
+            self.query_ids.append(query_id)
+            return await super().get_latest_result(query_id)
+
+        async def health_check(self) -> bool:
+            self.health_check_calls += 1
+            return False
+
+    class FakeSettings:
+        dune_stablecoin_volume_query_id = 42
+
+    client = ProbeDuneClient()
+    collector = DuneCollector(client, FakeSettings())
+
+    assert await collector.health_check() is True
+    assert client.query_ids == [42]
+    assert client.health_check_calls == 0
+
+
 def test_dune_metric_query_map_keeps_only_uncovered_metrics():
     assert METRIC_QUERY_MAP == {
         "stablecoin_transfer_volume": "dune_stablecoin_volume_query_id",

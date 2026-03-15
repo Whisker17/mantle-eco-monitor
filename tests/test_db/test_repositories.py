@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src.db.models import Base, AlertEvent, DeliveryEvent, MetricSnapshot, SourceRun
+from src.db.models import Base, AlertEvent, DeliveryEvent, MetricSnapshot, SourceRun, WatchlistProtocol
 from src.db.repositories import (
     TimeWindow,
     create_delivery_event,
@@ -17,6 +17,7 @@ from src.db.repositories import (
     insert_source_run,
     mark_delivery_event_delivered,
     mark_delivery_event_failed,
+    upsert_watchlist,
 )
 from src.ingestion.base import MetricRecord
 
@@ -245,3 +246,39 @@ async def test_mark_delivery_event_failed_increments_attempt_count(async_session
     assert reloaded.status == "failed"
     assert reloaded.attempt_count == 1
     assert reloaded.last_error == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_upsert_watchlist_rewrites_metrics_as_list(async_session):
+    now = datetime.now(tz=timezone.utc)
+    existing = WatchlistProtocol(
+        slug="aave-v3",
+        display_name="Aave V3",
+        category="lending",
+        monitoring_tier="special",
+        is_pinned=True,
+        metrics='["broken"]',
+        active=True,
+        added_at=now,
+        updated_at=now,
+    )
+    async_session.add(existing)
+    await async_session.commit()
+
+    await upsert_watchlist(
+        async_session,
+        [
+            {
+                "slug": "aave-v3",
+                "display_name": "Aave V3",
+                "category": "lending",
+                "tier": "special",
+                "pinned": True,
+                "metrics": ["tvl", "supply", "borrowed", "utilization"],
+            }
+        ],
+    )
+    await async_session.commit()
+    await async_session.refresh(existing)
+
+    assert existing.metrics == ["tvl", "supply", "borrowed", "utilization"]

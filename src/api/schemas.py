@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+import json
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class AlertResponse(BaseModel):
@@ -61,8 +62,21 @@ class WatchlistItemResponse(BaseModel):
     category: str
     monitoring_tier: str
     is_pinned: bool
-    metrics: list[str] | str
+    metrics: list[str]
     active: bool
+
+    @field_validator("metrics", mode="before")
+    @classmethod
+    def _normalize_metrics(cls, value):
+        if isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+            except json.JSONDecodeError:
+                return [value]
+            if isinstance(decoded, list):
+                return [str(item) for item in decoded]
+            return [str(decoded)]
+        return value
 
     model_config = {"from_attributes": True}
 

@@ -224,4 +224,11 @@ class DuneCollector(BaseCollector):
         return records
 
     async def health_check(self) -> bool:
+        query_id = getattr(self._settings, "dune_stablecoin_volume_query_id", 0) if self._settings else 0
+        if query_id:
+            try:
+                await self._client.get_latest_result(query_id)
+                return True
+            except Exception:
+                return False
         return await self._client.health_check()

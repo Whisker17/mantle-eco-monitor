@@ -10,6 +10,7 @@ def test_get_watchlist_returns_pinned_aave(client, seeded_watchlist):
     aave = next(p for p in data["protocols"] if p["slug"] == "aave-v3")
     assert aave["is_pinned"] is True
     assert aave["monitoring_tier"] == "special"
+    assert aave["metrics"] == ["tvl", "supply", "borrowed", "utilization"]
 
 
 def test_get_watchlist_empty(client):
