@@ -27,6 +27,7 @@ Last updated: 2026-03-14
 - [x] `/api/health` reports DB connectivity, source status, and next scheduled run.
 - [x] Scheduler shutdown no longer throws the APScheduler context cleanup error in lifespan tests.
 - [x] Full automated test suite passes on the runtime branch.
+- [x] Local `dev_live` smoke check script exists for startup and availability verification.
 - [ ] Runtime branch merged back to `main`.
 - [ ] Production deployment completed on server.
 - [ ] Production migrations run against the deployment database.
@@ -43,6 +44,7 @@ Last updated: 2026-03-14
 - [ ] Start the service and confirm `/api/health` returns `healthy` or expected `degraded`.
 - [ ] Observe `/api/health/sources` after the first scheduler runs.
 - [ ] Verify the first watchlist refresh and first persisted snapshots in production.
+- [ ] Run `./scripts/dev_live_check.sh full` when validating local `dev_live` behavior.
 
 ### Risks
 

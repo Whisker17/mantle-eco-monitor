@@ -144,6 +144,61 @@ def make_fake_python(tmp_path: Path) -> Path:
     return make_executable(tmp_path / "fake-python.sh", shim + "\n")
 
 
+def make_retrying_health_curl(
+    tmp_path: Path,
+    *,
+    health_failures_before_success: int,
+    health_json: str,
+    sources_json: str,
+    mnt_metric_json: str,
+    tvs_metric_json: str,
+) -> Path:
+    health_path = tmp_path / "health.json"
+    sources_path = tmp_path / "sources.json"
+    mnt_path = tmp_path / "mnt.json"
+    tvs_path = tmp_path / "tvs.json"
+    counter_path = tmp_path / "health-count.txt"
+
+    health_path.write_text(health_json, encoding="utf-8")
+    sources_path.write_text(sources_json, encoding="utf-8")
+    mnt_path.write_text(mnt_metric_json, encoding="utf-8")
+    tvs_path.write_text(tvs_metric_json, encoding="utf-8")
+
+    script = "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            'url="${@: -1}"',
+            f'counter_path="{counter_path}"',
+            'current_count=0',
+            'if [ -f "${counter_path}" ]; then current_count="$(cat "${counter_path}")"; fi',
+            'case "$url" in',
+            '  *"/api/health/sources"*)',
+            f'    cat "{sources_path}"',
+            "    ;;",
+            '  *"/api/health")',
+            '    next_count=$((current_count + 1))',
+            '    printf "%s" "${next_count}" > "${counter_path}"',
+            f'    if [ "${{next_count}}" -le {health_failures_before_success} ]; then',
+            "      exit 7",
+            "    fi",
+            f'    cat "{health_path}"',
+            "    ;;",
+            '  *"metric_name=mnt_volume"*)',
+            f'    cat "{mnt_path}"',
+            "    ;;",
+            '  *"metric_name=total_value_secured"*)',
+            f'    cat "{tvs_path}"',
+            "    ;;",
+            '  *)',
+            '    echo "unexpected url: $url" >&2',
+            "    exit 6",
+            "    ;;",
+            "esac",
+        ]
+    )
+    return make_executable(tmp_path / "retrying-curl.sh", script + "\n")
+
+
 def test_up_exits_with_code_1_when_database_url_is_missing(tmp_path):
     fake_uvicorn = make_executable(
         tmp_path / "fake-uvicorn.sh",
@@ -319,10 +374,12 @@ def test_check_prints_summary_for_successful_health_and_source_jobs(tmp_path):
         ),
         sources_json=(
             '{"runs":['
-            '{"source_platform":"coingecko","status":"success","started_at":"now","id":1,"job_name":"core_coingecko","records_collected":1,"error_message":null,"latency_ms":10},'
-            '{"source_platform":"l2beat","status":"success","started_at":"now","id":2,"job_name":"core_l2beat","records_collected":1,"error_message":null,"latency_ms":10}'
+                '{"source_platform":"coingecko","status":"success","started_at":"now","id":1,"job_name":"core_coingecko","records_collected":1,"error_message":null,"latency_ms":10},'
+                '{"source_platform":"l2beat","status":"success","started_at":"now","id":2,"job_name":"core_l2beat","records_collected":1,"error_message":null,"latency_ms":10}'
             ']}'
         ),
+        mnt_metric_json='{"snapshots":[{"entity":"mantle"}]}',
+        tvs_metric_json='{"snapshots":[{"entity":"mantle"}]}',
     )
     fake_python = make_fake_python(tmp_path)
 
@@ -347,3 +404,126 @@ def test_check_prints_summary_for_successful_health_and_source_jobs(tmp_path):
     assert "db=connected" in output
     assert "coingecko=success" in output
     assert "l2beat=success" in output
+
+
+def test_check_returns_code_4_when_key_metrics_are_missing(tmp_path):
+    fake_curl = make_fake_curl(
+        tmp_path,
+        health_json=(
+            '{"status":"healthy","db":"connected","next_scheduled_run":"2026-03-15T14:02:00+08:00",'
+            '"last_source_runs":{}}'
+        ),
+        sources_json='{"runs":[]}',
+        mnt_metric_json='{"snapshots":[]}',
+        tvs_metric_json='{"snapshots":[]}',
+    )
+    fake_python = make_fake_python(tmp_path)
+
+    result = run_script(
+        "check",
+        env={
+            "DATABASE_URL": "sqlite+aiosqlite:///./test.db",
+            "CURL_BIN": str(fake_curl),
+            "PYTHON_BIN": str(fake_python),
+            "REAL_PYTHON": sys.executable,
+            "FAKE_SOURCE_HEALTH_STDOUT": "{'defillama': 'success'}",
+            "FAKE_COINGECKO_STDOUT": "{'status': 'ok'}",
+            "FAKE_L2BEAT_STDOUT": "{'status': 'ok'}",
+        },
+    )
+
+    assert result.returncode == 4
+    assert "mnt_volume=missing" in (result.stdout + result.stderr)
+
+
+def test_full_waits_for_health_readiness_before_running_checks(tmp_path):
+    fake_curl = make_retrying_health_curl(
+        tmp_path,
+        health_failures_before_success=1,
+        health_json=(
+            '{"status":"healthy","db":"connected","next_scheduled_run":"2026-03-15T14:02:00+08:00",'
+            '"last_source_runs":{}}'
+        ),
+        sources_json=(
+            '{"runs":['
+            '{"source_platform":"coingecko","status":"success","started_at":"now","id":1,"job_name":"core_coingecko","records_collected":1,"error_message":null,"latency_ms":10},'
+            '{"source_platform":"l2beat","status":"success","started_at":"now","id":2,"job_name":"core_l2beat","records_collected":1,"error_message":null,"latency_ms":10}'
+            ']}'
+        ),
+        mnt_metric_json='{"snapshots":[{"entity":"mantle"}]}',
+        tvs_metric_json='{"snapshots":[{"entity":"mantle"}]}',
+    )
+    fake_python = make_fake_python(tmp_path)
+    fake_uvicorn = make_executable(
+        tmp_path / "fake-uvicorn.sh",
+        (
+            "#!/usr/bin/env bash\n"
+            "trap 'exit 0' TERM INT\n"
+            "while true; do sleep 1; done\n"
+        ),
+    )
+    tmp_dir = tmp_path / ".tmp"
+
+    result = run_script(
+        "full",
+        env={
+            "DATABASE_URL": "sqlite+aiosqlite:///./test.db",
+            "TMP_DIR": str(tmp_dir),
+            "CURL_BIN": str(fake_curl),
+            "PYTHON_BIN": str(fake_python),
+            "REAL_PYTHON": sys.executable,
+            "UVICORN_BIN": str(fake_uvicorn),
+            "WAIT_SECONDS": "3",
+            "FAKE_SOURCE_HEALTH_STDOUT": "{'defillama': 'success'}",
+            "FAKE_COINGECKO_STDOUT": "{'status': 'ok'}",
+            "FAKE_L2BEAT_STDOUT": "{'status': 'ok'}",
+        },
+    )
+
+    assert result.returncode == 0
+    assert "service=up" in (result.stdout + result.stderr)
+    run_script("down", env={"TMP_DIR": str(tmp_dir)})
+
+
+def test_full_returns_zero_when_checks_succeed(tmp_path):
+    fake_curl = make_fake_curl(
+        tmp_path,
+        health_json=(
+            '{"status":"healthy","db":"connected","next_scheduled_run":"2026-03-15T14:02:00+08:00",'
+            '"last_source_runs":{}}'
+        ),
+        sources_json='{"runs":[{"source_platform":"coingecko","status":"success","started_at":"now","id":1,"job_name":"core_coingecko","records_collected":1,"error_message":null,"latency_ms":10}]}',
+        mnt_metric_json='{"snapshots":[{"entity":"mantle"}]}',
+        tvs_metric_json='{"snapshots":[{"entity":"mantle"}]}',
+    )
+    fake_python = make_fake_python(tmp_path)
+    fake_uvicorn = make_executable(
+        tmp_path / "fake-uvicorn.sh",
+        (
+            "#!/usr/bin/env bash\n"
+            "trap 'exit 0' TERM INT\n"
+            "while true; do sleep 1; done\n"
+        ),
+    )
+    tmp_dir = tmp_path / ".tmp"
+
+    result = run_script(
+        "full",
+        env={
+            "DATABASE_URL": "sqlite+aiosqlite:///./test.db",
+            "TMP_DIR": str(tmp_dir),
+            "CURL_BIN": str(fake_curl),
+            "PYTHON_BIN": str(fake_python),
+            "REAL_PYTHON": sys.executable,
+            "UVICORN_BIN": str(fake_uvicorn),
+            "WAIT_SECONDS": "2",
+            "FAKE_SOURCE_HEALTH_STDOUT": "{'defillama': 'success'}",
+            "FAKE_COINGECKO_STDOUT": "{'status': 'ok'}",
+            "FAKE_L2BEAT_STDOUT": "{'status': 'ok'}",
+        },
+    )
+
+    assert result.returncode == 0
+    assert "mnt_volume=present" in (result.stdout + result.stderr)
+    assert "total_value_secured=present" in (result.stdout + result.stderr)
+    run_script("down", env={"TMP_DIR": str(tmp_dir)})

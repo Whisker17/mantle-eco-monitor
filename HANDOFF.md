@@ -130,11 +130,21 @@ Branch `codex/phase1-runtime` is the branch I would currently treat as deployabl
 4. Confirm `metric_snapshots` is increasing after scheduler cycles
 5. Confirm `source_runs` reflects expected success/failure patterns
 
+## Local Dev Check
+
+For local `dev_live` verification:
+
+1. Set `DATABASE_URL`
+2. Set `SCHEDULER_PROFILE=dev_live`
+3. Run `./scripts/dev_live_check.sh full`
+4. When finished, run `./scripts/dev_live_check.sh down`
+
 ## Important Files
 
 - Runtime orchestration:
   - `src/scheduler/runtime.py`
   - `src/scheduler/jobs.py`
+  - `scripts/dev_live_check.sh`
 - App startup/shutdown:
   - `src/main.py`
 - Health/readiness:

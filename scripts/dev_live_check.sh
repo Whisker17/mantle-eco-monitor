@@ -14,6 +14,8 @@ PID_FILE="${TMP_DIR}/dev_live.pid"
 LOG_FILE="${TMP_DIR}/dev_live.log"
 HEALTH_URL="http://${APP_HOST}:${APP_PORT}/api/health"
 SOURCES_URL="http://${APP_HOST}:${APP_PORT}/api/health/sources"
+MNT_METRIC_URL="http://${APP_HOST}:${APP_PORT}/api/metrics/latest?entity=mantle&metric_name=mnt_volume"
+TVS_METRIC_URL="http://${APP_HOST}:${APP_PORT}/api/metrics/latest?entity=mantle&metric_name=total_value_secured"
 
 
 usage() {
@@ -82,6 +84,18 @@ PY
 }
 
 
+metric_presence() {
+  local payload="$1"
+  "${PYTHON_BIN}" - "${payload}" <<'PY'
+import json
+import sys
+
+snapshots = json.loads(sys.argv[1]).get("snapshots", [])
+print("present" if snapshots else "missing")
+PY
+}
+
+
 start_server() {
   if [ -f "${PID_FILE}" ]; then
     local existing_pid
@@ -121,7 +135,7 @@ stop_server() {
 
   if [ -n "${pid}" ] && kill -0 "${pid}" >/dev/null 2>&1; then
     kill "${pid}" >/dev/null 2>&1 || true
-    for _ in $(seq 1 50); do
+    for _ in $(seq 1 20); do
       if ! kill -0 "${pid}" >/dev/null 2>&1; then
         break
       fi
@@ -208,13 +222,49 @@ command_check() {
     [ -n "${line}" ] && echo "${line}"
   done < <(summarize_sources "${sources_json}")
 
+  local mnt_metric_json
+  local tvs_metric_json
+  if ! mnt_metric_json="$(fetch_json "${MNT_METRIC_URL}")"; then
+    echo "Failed to reach ${MNT_METRIC_URL}" >&2
+    return 2
+  fi
+  if ! tvs_metric_json="$(fetch_json "${TVS_METRIC_URL}")"; then
+    echo "Failed to reach ${TVS_METRIC_URL}" >&2
+    return 2
+  fi
+
+  local mnt_status
+  local tvs_status
+  mnt_status="$(metric_presence "${mnt_metric_json}")"
+  tvs_status="$(metric_presence "${tvs_metric_json}")"
+
+  echo "Metric Checks"
+  echo "mnt_volume=${mnt_status}"
+  echo "total_value_secured=${tvs_status}"
+
+  if [ "${mnt_status}" != "present" ] || [ "${tvs_status}" != "present" ]; then
+    return 4
+  fi
+
   return 0
 }
 
 
 command_full() {
   command_up || return $?
-  command_check || return $?
+
+  local elapsed=0
+  while [ "${elapsed}" -lt "${WAIT_SECONDS}" ]; do
+    if fetch_json "${HEALTH_URL}" >/dev/null 2>&1; then
+      command_check || return $?
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  echo "Service did not become ready at ${HEALTH_URL} within ${WAIT_SECONDS} seconds" >&2
+  return 2
 }
 
 
