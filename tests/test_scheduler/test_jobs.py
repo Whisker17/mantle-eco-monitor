@@ -1,15 +1,21 @@
 import pytest
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from src.ingestion.dune import DuneCollector
 from src.scheduler.jobs import build_scheduler, core_dune_job, load_scheduler_profile
 
 
-def test_scheduler_registers_phase1_jobs():
-    scheduler = build_scheduler()
+def test_build_scheduler_registers_prod_cron_jobs():
+    class FakeSettings:
+        scheduler_profile = "prod"
+        scheduler_config_path = "config/scheduler.toml"
+
+    scheduler = build_scheduler(FakeSettings())
     schedules = scheduler.get_schedules()
     schedule_ids = {s.id for s in schedules}
 
-    expected_ids = {
+    assert schedule_ids == {
         "core_defillama",
         "core_growthepie",
         "core_dune",
@@ -20,13 +26,58 @@ def test_scheduler_registers_phase1_jobs():
         "watchlist_refresh",
         "source_health",
     }
-    assert schedule_ids >= expected_ids
+
+    schedule_by_id = {schedule.id: schedule for schedule in schedules}
+    assert isinstance(schedule_by_id["core_defillama"].trigger, CronTrigger)
+    assert isinstance(schedule_by_id["source_health"].trigger, CronTrigger)
 
 
-def test_scheduler_has_correct_count():
-    scheduler = build_scheduler()
+def test_build_scheduler_registers_interval_jobs_and_skips_manual_jobs():
+    class FakeSettings:
+        scheduler_profile = "dev_live"
+        scheduler_config_path = "config/scheduler.toml"
+
+    scheduler = build_scheduler(FakeSettings())
     schedules = scheduler.get_schedules()
-    assert len(schedules) >= 9
+    schedule_ids = {s.id for s in schedules}
+
+    assert schedule_ids == {
+        "core_l2beat",
+        "core_coingecko",
+        "source_health",
+    }
+
+    schedule_by_id = {schedule.id: schedule for schedule in schedules}
+    assert isinstance(schedule_by_id["core_l2beat"].trigger, IntervalTrigger)
+    assert isinstance(schedule_by_id["core_coingecko"].trigger, IntervalTrigger)
+    assert isinstance(schedule_by_id["source_health"].trigger, IntervalTrigger)
+
+
+def test_build_scheduler_skips_disabled_jobs(tmp_path):
+    config_path = tmp_path / "scheduler.toml"
+    config_path.write_text(
+        """
+active_profile = "ci"
+
+[profiles.ci]
+scheduler_enabled = false
+
+[profiles.ci.jobs.core_defillama]
+mode = "disabled"
+
+[profiles.ci.jobs.source_health]
+mode = "disabled"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class FakeSettings:
+        scheduler_profile = "ci"
+        scheduler_config_path = str(config_path)
+
+    scheduler = build_scheduler(FakeSettings())
+
+    assert scheduler.get_schedules() == []
 
 
 def test_load_scheduler_profile_uses_toml_active_profile(tmp_path):

@@ -7,6 +7,7 @@ from typing import Any
 
 from apscheduler import Scheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from config.settings import Settings
 from src.api.deps import get_session_factory
@@ -150,28 +151,45 @@ def load_scheduler_profile(
     return profile_name, profile
 
 
-SCHEDULE_CONFIG = [
-    {"id": "core_defillama", "func": core_defillama_job, "trigger": CronTrigger(hour="*/4", minute=0)},
-    {"id": "core_growthepie", "func": core_growthepie_job, "trigger": CronTrigger(hour="*/4", minute=2)},
-    {"id": "core_coingecko", "func": core_coingecko_job, "trigger": CronTrigger(hour="*/4", minute=5)},
-    {"id": "eco_aave", "func": eco_aave_job, "trigger": CronTrigger(hour="*/4", minute=10)},
-    {"id": "core_l2beat", "func": core_l2beat_job, "trigger": CronTrigger(hour="*/6", minute=15)},
-    {"id": "core_dune", "func": core_dune_job, "trigger": CronTrigger(hour="*/6", minute=20)},
-    {"id": "eco_protocols", "func": eco_protocols_job, "trigger": CronTrigger(hour="*/6", minute=30)},
-    {"id": "watchlist_refresh", "func": watchlist_refresh_job, "trigger": CronTrigger(hour=4, minute=0)},
-    {"id": "source_health", "func": source_health_job, "trigger": CronTrigger(hour="*", minute=45)},
-]
+def _build_trigger(job_id: str, job_config: dict[str, Any], timezone: str | None):
+    mode = job_config.get("mode")
+    if mode == "cron":
+        return CronTrigger(
+            hour=job_config.get("hour"),
+            minute=job_config.get("minute"),
+            second=job_config.get("second", 0),
+            timezone=timezone,
+        )
+    if mode == "interval":
+        return IntervalTrigger(
+            weeks=job_config.get("weeks", 0),
+            days=job_config.get("days", 0),
+            hours=job_config.get("hours", 0),
+            minutes=job_config.get("minutes", 0),
+            seconds=job_config.get("seconds", 0),
+        )
+    if mode in {"manual", "disabled"}:
+        return None
+    raise ValueError(f"Unsupported scheduler mode for {job_id}: {mode}")
 
 
-def build_scheduler() -> Scheduler:
+def build_scheduler(settings: Settings | None = None) -> Scheduler:
+    settings = settings or Settings()
+    _, profile = load_scheduler_profile(settings)
     scheduler = Scheduler()
+    timezone = profile.get("timezone")
+    jobs = profile.get("jobs", {})
 
-    for cfg in SCHEDULE_CONFIG:
-        scheduler.configure_task(cfg["id"], func=cfg["func"])
+    for job_id, job_config in jobs.items():
+        trigger = _build_trigger(job_id, job_config, timezone)
+        if trigger is None:
+            continue
+
+        scheduler.configure_task(job_id, func=JOB_REGISTRY[job_id])
         scheduler.add_schedule(
-            cfg["id"],
-            trigger=cfg["trigger"],
-            id=cfg["id"],
+            job_id,
+            trigger=trigger,
+            id=job_id,
         )
 
     return scheduler
