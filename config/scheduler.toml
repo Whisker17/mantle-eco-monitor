@@ -1,0 +1,113 @@
+active_profile = "prod"
+
+[profiles.prod]
+timezone = "Asia/Shanghai"
+
+[profiles.prod.jobs.core_defillama]
+mode = "cron"
+hour = "10,18"
+minute = 0
+
+[profiles.prod.jobs.core_growthepie]
+mode = "cron"
+hour = "10,18"
+minute = 10
+
+[profiles.prod.jobs.core_l2beat]
+mode = "cron"
+hour = "10,18"
+minute = 20
+
+[profiles.prod.jobs.core_dune]
+mode = "cron"
+hour = "10,18"
+minute = 30
+
+[profiles.prod.jobs.core_coingecko]
+mode = "cron"
+hour = "10,18"
+minute = 40
+
+[profiles.prod.jobs.eco_aave]
+mode = "cron"
+hour = "10,18"
+minute = 50
+
+[profiles.prod.jobs.eco_protocols]
+mode = "cron"
+hour = "11,19"
+minute = 0
+
+[profiles.prod.jobs.watchlist_refresh]
+mode = "cron"
+hour = 4
+minute = 0
+
+[profiles.prod.jobs.source_health]
+mode = "cron"
+hour = "*"
+minute = 45
+
+[profiles.dev_live]
+timezone = "Asia/Shanghai"
+
+[profiles.dev_live.jobs.core_defillama]
+mode = "manual"
+
+[profiles.dev_live.jobs.core_growthepie]
+mode = "manual"
+
+[profiles.dev_live.jobs.core_l2beat]
+mode = "interval"
+minutes = 15
+
+[profiles.dev_live.jobs.core_dune]
+mode = "manual"
+
+[profiles.dev_live.jobs.core_coingecko]
+mode = "interval"
+minutes = 5
+
+[profiles.dev_live.jobs.eco_aave]
+mode = "manual"
+
+[profiles.dev_live.jobs.eco_protocols]
+mode = "manual"
+
+[profiles.dev_live.jobs.watchlist_refresh]
+mode = "manual"
+
+[profiles.dev_live.jobs.source_health]
+mode = "interval"
+minutes = 2
+
+[profiles.ci]
+scheduler_enabled = false
+timezone = "Asia/Shanghai"
+
+[profiles.ci.jobs.core_defillama]
+mode = "disabled"
+
+[profiles.ci.jobs.core_growthepie]
+mode = "disabled"
+
+[profiles.ci.jobs.core_l2beat]
+mode = "disabled"
+
+[profiles.ci.jobs.core_dune]
+mode = "disabled"
+
+[profiles.ci.jobs.core_coingecko]
+mode = "disabled"
+
+[profiles.ci.jobs.eco_aave]
+mode = "disabled"
+
+[profiles.ci.jobs.eco_protocols]
+mode = "disabled"
+
+[profiles.ci.jobs.watchlist_refresh]
+mode = "disabled"
+
+[profiles.ci.jobs.source_health]
+mode = "disabled"
