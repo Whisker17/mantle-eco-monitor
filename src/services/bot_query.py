@@ -1,31 +1,70 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from src.integrations.lark.cards import build_bot_reply_card
-from src.services.query_tools import get_latest_metric, get_metric_history, get_recent_alerts
+from src.services.query_tools import (
+    get_alerts_list,
+    get_daily_summary_context,
+    get_health_status,
+    get_latest_metric,
+    get_metric_history,
+    get_recent_alerts,
+    get_source_health,
+    get_watchlist,
+)
 
-UNSUPPORTED_MESSAGE = (
-    "I currently support latest metrics, history, recent alerts, daily summaries, and source lookups."
+SUPPORTED_INTENTS = (
+    "metric_latest",
+    "metric_history",
+    "recent_alerts",
+    "alerts_list",
+    "health_status",
+    "source_health",
+    "watchlist",
+    "daily_summary",
+)
+SUPPORTED_CAPABILITIES_TEXT = (
+    "latest metrics, metric history, alerts, health status, source health, watchlist, "
+    "and daily summaries"
 )
 
 
 class BotQueryService:
-    def __init__(self, *, session_factory, llm_client):
+    def __init__(self, *, session_factory, llm_client, external_actions_enabled: bool = False):
         self._session_factory = session_factory
         self._llm_client = llm_client
+        self._external_actions_enabled = external_actions_enabled
+        self._intent_handlers = {
+            "metric_latest": self._handle_metric_latest,
+            "metric_history": self._handle_metric_history,
+            "recent_alerts": self._handle_recent_alerts,
+            "alerts_list": self._handle_alerts_list,
+            "health_status": self._handle_health_status,
+            "source_health": self._handle_source_health,
+            "watchlist": self._handle_watchlist,
+            "daily_summary": self._handle_daily_summary,
+        }
 
     async def handle_message(self, text: str, *, now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now(tz=UTC)
         intent_payload = await self._parse_intent(text)
         if intent_payload["intent"] == "unsupported":
-            return self._unsupported_response()
+            return await self._build_constrained_response(
+                text=text,
+                requested_intent=intent_payload.get("requested_intent"),
+                reason="unsupported_intent",
+            )
 
         data = await self._execute_intent(intent_payload, now=now)
-        if data is None:
-            return self._unsupported_response()
+        if not self._has_internal_data(intent_payload["intent"], data):
+            return await self._build_constrained_response(
+                text=text,
+                requested_intent=intent_payload["intent"],
+                reason="no_internal_data",
+            )
 
         source_urls = sorted(self._collect_source_urls(data))
         answer = await self._llm_client.complete(
@@ -63,7 +102,10 @@ class BotQueryService:
                     "role": "system",
                     "content": (
                         "Map the user message to JSON with intent one of: "
-                        "metric_latest, metric_history, recent_alerts, unsupported."
+                        "metric_latest, metric_history, recent_alerts, alerts_list, "
+                        "health_status, source_health, watchlist, daily_summary, unsupported. "
+                        "Requests to refresh, review, mutate state, trigger jobs, search the web, "
+                        "or perform external actions must map to unsupported."
                     ),
                 },
                 {
@@ -110,33 +152,76 @@ class BotQueryService:
                     "entity": entity,
                     "limit": limit,
                 }
-        return {"intent": "unsupported"}
+        if intent == "alerts_list":
+            entity = payload.get("entity")
+            scope = payload.get("scope")
+            severity = payload.get("severity")
+            is_ath = payload.get("is_ath")
+            is_milestone = payload.get("is_milestone")
+            reviewed = payload.get("reviewed")
+            days = payload.get("days", 7)
+            limit = payload.get("limit", 10)
+            offset = payload.get("offset", 0)
+            if (
+                (entity is None or isinstance(entity, str))
+                and (scope is None or isinstance(scope, str))
+                and (severity is None or isinstance(severity, str))
+                and (is_ath is None or isinstance(is_ath, bool))
+                and (is_milestone is None or isinstance(is_milestone, bool))
+                and (reviewed is None or isinstance(reviewed, bool))
+                and isinstance(days, int)
+                and days > 0
+                and isinstance(limit, int)
+                and limit > 0
+                and isinstance(offset, int)
+                and offset >= 0
+            ):
+                return {
+                    "intent": intent,
+                    "entity": entity,
+                    "scope": scope,
+                    "severity": severity,
+                    "is_ath": is_ath,
+                    "is_milestone": is_milestone,
+                    "reviewed": reviewed,
+                    "days": days,
+                    "limit": limit,
+                    "offset": offset,
+                }
+        if intent == "health_status":
+            return {"intent": intent}
+        if intent == "source_health":
+            source_platform = payload.get("source_platform")
+            limit = payload.get("limit", 20)
+            if (source_platform is None or isinstance(source_platform, str)) and isinstance(limit, int) and limit > 0:
+                return {
+                    "intent": intent,
+                    "source_platform": source_platform,
+                    "limit": limit,
+                }
+        if intent == "watchlist":
+            return {"intent": intent}
+        if intent == "daily_summary":
+            if isinstance(payload.get("day"), str):
+                try:
+                    date.fromisoformat(payload["day"])
+                except ValueError:
+                    return {"intent": "unsupported", "requested_intent": intent}
+                return {"intent": intent, "day": payload["day"]}
+            days_ago = payload.get("days_ago", 1)
+            if isinstance(days_ago, int) and days_ago >= 0:
+                return {"intent": intent, "days_ago": days_ago}
+        if isinstance(intent, str):
+            return {"intent": "unsupported", "requested_intent": intent}
+        return {"intent": "unsupported", "requested_intent": None}
 
     async def _execute_intent(self, payload: dict[str, Any], *, now: datetime) -> dict[str, Any] | None:
+        handler = self._intent_handlers.get(payload["intent"])
+        if handler is None:
+            return None
+
         async with self._session_factory() as session:
-            match payload["intent"]:
-                case "metric_latest":
-                    return await get_latest_metric(
-                        session,
-                        entity=payload["entity"],
-                        metric_name=payload["metric_name"],
-                    )
-                case "metric_history":
-                    return await get_metric_history(
-                        session,
-                        entity=payload["entity"],
-                        metric_name=payload["metric_name"],
-                        since=now - timedelta(days=payload["days"]),
-                        until=now,
-                    )
-                case "recent_alerts":
-                    return await get_recent_alerts(
-                        session,
-                        entity=payload.get("entity"),
-                        limit=payload["limit"],
-                    )
-                case _:
-                    return None
+            return await handler(session, payload, now=now)
 
     def _collect_source_urls(self, value: Any) -> set[str]:
         urls: set[str] = set()
@@ -151,11 +236,120 @@ class BotQueryService:
                 urls.update(self._collect_source_urls(item))
         return urls
 
-    def _unsupported_response(self) -> dict[str, Any]:
+    async def _handle_metric_latest(self, session, payload: dict[str, Any], *, now: datetime) -> dict[str, Any] | None:
+        return await get_latest_metric(
+            session,
+            entity=payload["entity"],
+            metric_name=payload["metric_name"],
+        )
+
+    async def _handle_metric_history(self, session, payload: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+        return await get_metric_history(
+            session,
+            entity=payload["entity"],
+            metric_name=payload["metric_name"],
+            since=now - timedelta(days=payload["days"]),
+            until=now,
+        )
+
+    async def _handle_recent_alerts(self, session, payload: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+        return await get_recent_alerts(
+            session,
+            entity=payload.get("entity"),
+            limit=payload["limit"],
+        )
+
+    async def _handle_alerts_list(self, session, payload: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+        return await get_alerts_list(
+            session,
+            scope=payload.get("scope"),
+            entity=payload.get("entity"),
+            severity=payload.get("severity"),
+            is_ath=payload.get("is_ath"),
+            is_milestone=payload.get("is_milestone"),
+            reviewed=payload.get("reviewed"),
+            since=now - timedelta(days=payload["days"]),
+            until=now,
+            limit=payload["limit"],
+            offset=payload["offset"],
+        )
+
+    async def _handle_health_status(self, session, payload: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+        return await get_health_status(session)
+
+    async def _handle_source_health(self, session, payload: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+        return await get_source_health(
+            session,
+            source_platform=payload.get("source_platform"),
+            limit=payload["limit"],
+        )
+
+    async def _handle_watchlist(self, session, payload: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+        return await get_watchlist(session)
+
+    async def _handle_daily_summary(self, session, payload: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+        if "day" in payload:
+            summary_day = date.fromisoformat(payload["day"])
+        else:
+            summary_day = now.date() - timedelta(days=payload.get("days_ago", 1))
+        return await get_daily_summary_context(session, day=summary_day)
+
+    def _has_internal_data(self, intent: str, data: dict[str, Any] | None) -> bool:
+        if data is None:
+            return False
+
+        if intent == "metric_history":
+            return bool(data.get("points"))
+        if intent == "alerts_list":
+            return bool(data.get("alerts"))
+        if intent == "recent_alerts":
+            return bool(data.get("alerts"))
+        if intent == "source_health":
+            return bool(data.get("runs"))
+        if intent == "watchlist":
+            return bool(data.get("protocols"))
+        if intent == "daily_summary":
+            return bool(data.get("metrics")) or bool(data.get("alerts"))
+        return True
+
+    async def _build_constrained_response(
+        self,
+        *,
+        text: str,
+        requested_intent: str | None,
+        reason: str,
+    ) -> dict[str, Any]:
+        answer = await self._llm_client.complete(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a Mantle monitoring bot. "
+                        "Do not claim you executed anything, searched the web, or used unsupported tools. "
+                        f"The currently supported capabilities are {SUPPORTED_CAPABILITIES_TEXT}. "
+                        "External actions are disabled unless explicitly enabled, and they are currently disabled."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "question": text,
+                            "reason": reason,
+                            "requested_intent": requested_intent,
+                            "supported_intents": list(SUPPORTED_INTENTS),
+                            "external_actions_enabled": self._external_actions_enabled,
+                        },
+                        sort_keys=True,
+                    ),
+                },
+            ]
+        )
+        response_intent = "unsupported" if reason == "unsupported_intent" else requested_intent or "unsupported"
         return {
-            "intent": "unsupported",
-            "answer": UNSUPPORTED_MESSAGE,
+            "intent": response_intent,
+            "answer": answer,
             "data": {},
             "source_urls": [],
-            "card": build_bot_reply_card(answer=UNSUPPORTED_MESSAGE, source_urls=[]),
+            "card": build_bot_reply_card(answer=answer, source_urls=[]),
         }

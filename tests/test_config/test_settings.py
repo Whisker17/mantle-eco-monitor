@@ -48,6 +48,7 @@ def test_settings_defaults():
     assert settings.ai_enrichment_enabled is False
     assert settings.lark_delivery_enabled is False
     assert settings.lark_bot_enabled is False
+    assert settings.bot_external_actions_enabled is False
     assert settings.scheduler_enabled is True
     assert settings.scheduler_profile == "prod"
     assert settings.scheduler_config_path == "config/scheduler.toml"
@@ -87,6 +88,7 @@ def test_settings_allow_lark_and_llm_overrides():
         _env_file=None,
         database_url="postgresql+asyncpg://x:y@localhost:5432/mantle_monitor",
         lark_bot_enabled=True,
+        bot_external_actions_enabled=True,
         lark_app_id="cli_x",
         lark_app_secret="secret_x",
         lark_verification_token="verify_x",
@@ -105,6 +107,7 @@ def test_settings_allow_lark_and_llm_overrides():
     )
 
     assert settings.lark_bot_enabled is True
+    assert settings.bot_external_actions_enabled is True
     assert settings.lark_app_id == "cli_x"
     assert settings.lark_app_secret == "secret_x"
     assert settings.lark_verification_token == "verify_x"

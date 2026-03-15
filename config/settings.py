@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     ai_enrichment_enabled: bool = False
     lark_delivery_enabled: bool = False
     lark_bot_enabled: bool = False
+    bot_external_actions_enabled: bool = False
     lark_app_id: str = ""
     lark_app_secret: str = ""
     lark_verification_token: str = ""
