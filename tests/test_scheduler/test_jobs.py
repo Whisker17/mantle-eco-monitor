@@ -2,6 +2,7 @@ import pytest
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+import src.scheduler.__main__ as scheduler_cli
 import src.scheduler.jobs as scheduler_jobs
 from src.ingestion.dune import DuneCollector
 from src.scheduler.jobs import build_scheduler, core_dune_job, load_scheduler_profile, run_job_now
@@ -228,6 +229,43 @@ mode = "disabled"
 
     with pytest.raises(ValueError, match="disabled"):
         await run_job_now("core_defillama", FakeSettings())
+
+
+def test_scheduler_cli_list_prints_job_modes(monkeypatch, capsys):
+    class FakeSettings:
+        scheduler_profile = "dev_live"
+        scheduler_config_path = "config/scheduler.toml"
+
+    monkeypatch.setattr(scheduler_cli, "Settings", lambda: FakeSettings())
+
+    result = scheduler_cli.main(["list"])
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert "Active profile: dev_live" in captured.out
+    assert "core_defillama: manual" in captured.out
+    assert "core_coingecko: interval" in captured.out
+
+
+def test_scheduler_cli_run_dispatches_job(monkeypatch, capsys):
+    class FakeSettings:
+        scheduler_profile = "dev_live"
+        scheduler_config_path = "config/scheduler.toml"
+
+    monkeypatch.setattr(scheduler_cli, "Settings", lambda: FakeSettings())
+
+    async def fake_run_job_now(job_id, settings):
+        assert job_id == "core_defillama"
+        assert settings.scheduler_profile == "dev_live"
+        return {"status": "ok"}
+
+    monkeypatch.setattr(scheduler_cli, "run_job_now", fake_run_job_now)
+
+    result = scheduler_cli.main(["run", "core_defillama"])
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert "{'status': 'ok'}" in captured.out
 
 
 @pytest.mark.asyncio
