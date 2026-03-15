@@ -1,7 +1,7 @@
 import pytest
 
 from src.ingestion.dune import DuneCollector
-from src.scheduler.jobs import build_scheduler, core_dune_job
+from src.scheduler.jobs import build_scheduler, core_dune_job, load_scheduler_profile
 
 
 def test_scheduler_registers_phase1_jobs():
@@ -27,6 +27,104 @@ def test_scheduler_has_correct_count():
     scheduler = build_scheduler()
     schedules = scheduler.get_schedules()
     assert len(schedules) >= 9
+
+
+def test_load_scheduler_profile_uses_toml_active_profile(tmp_path):
+    config_path = tmp_path / "scheduler.toml"
+    config_path.write_text(
+        """
+active_profile = "dev_live"
+
+[profiles.prod.jobs.core_defillama]
+mode = "cron"
+hour = 10
+minute = 0
+
+[profiles.dev_live.jobs.core_defillama]
+mode = "manual"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class FakeSettings:
+        scheduler_profile = "prod"
+        scheduler_config_path = str(config_path)
+
+    profile_name, profile = load_scheduler_profile(FakeSettings(), use_default_profile=True)
+
+    assert profile_name == "dev_live"
+    assert profile["jobs"]["core_defillama"]["mode"] == "manual"
+
+
+def test_load_scheduler_profile_allows_settings_override(tmp_path):
+    config_path = tmp_path / "scheduler.toml"
+    config_path.write_text(
+        """
+active_profile = "prod"
+
+[profiles.prod.jobs.core_defillama]
+mode = "cron"
+hour = 10
+minute = 0
+
+[profiles.dev_live.jobs.core_defillama]
+mode = "manual"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class FakeSettings:
+        scheduler_profile = "dev_live"
+        scheduler_config_path = str(config_path)
+
+    profile_name, profile = load_scheduler_profile(FakeSettings())
+
+    assert profile_name == "dev_live"
+    assert profile["jobs"]["core_defillama"]["mode"] == "manual"
+
+
+def test_load_scheduler_profile_rejects_unknown_profile(tmp_path):
+    config_path = tmp_path / "scheduler.toml"
+    config_path.write_text(
+        """
+active_profile = "prod"
+
+[profiles.prod.jobs.core_defillama]
+mode = "cron"
+hour = 10
+minute = 0
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class FakeSettings:
+        scheduler_profile = "missing"
+        scheduler_config_path = str(config_path)
+
+    with pytest.raises(ValueError, match="Unknown scheduler profile"):
+        load_scheduler_profile(FakeSettings())
+
+
+def test_load_scheduler_profile_rejects_unknown_job_ids(tmp_path):
+    config_path = tmp_path / "scheduler.toml"
+    config_path.write_text(
+        """
+active_profile = "prod"
+
+[profiles.prod.jobs.not_a_real_job]
+mode = "cron"
+hour = 10
+minute = 0
+""".strip(),
+        encoding="utf-8",
+    )
+
+    class FakeSettings:
+        scheduler_profile = "prod"
+        scheduler_config_path = str(config_path)
+
+    with pytest.raises(ValueError, match="Unknown scheduler job id"):
+        load_scheduler_profile(FakeSettings())
 
 
 @pytest.mark.asyncio

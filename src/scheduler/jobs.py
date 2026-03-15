@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import tomllib
+from pathlib import Path
+from typing import Any
 
 from apscheduler import Scheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -108,6 +111,43 @@ async def source_health_job():
         DuneCollector(DuneClient(settings.dune_api_key), settings),
     ]
     return await run_source_health_job(session_factory, collectors)
+
+
+JOB_REGISTRY = {
+    "core_defillama": core_defillama_job,
+    "core_growthepie": core_growthepie_job,
+    "core_dune": core_dune_job,
+    "core_l2beat": core_l2beat_job,
+    "core_coingecko": core_coingecko_job,
+    "eco_protocols": eco_protocols_job,
+    "eco_aave": eco_aave_job,
+    "watchlist_refresh": watchlist_refresh_job,
+    "source_health": source_health_job,
+}
+
+
+def load_scheduler_profile(
+    settings: Settings,
+    *,
+    use_default_profile: bool = False,
+) -> tuple[str, dict[str, Any]]:
+    config = tomllib.loads(Path(settings.scheduler_config_path).read_text(encoding="utf-8"))
+    profiles = config.get("profiles", {})
+
+    profile_name = config.get("active_profile", "prod")
+    if not use_default_profile:
+        profile_name = settings.scheduler_profile or profile_name
+
+    profile = profiles.get(profile_name)
+    if profile is None:
+        raise ValueError(f"Unknown scheduler profile: {profile_name}")
+
+    jobs = profile.get("jobs", {})
+    for job_id in jobs:
+        if job_id not in JOB_REGISTRY:
+            raise ValueError(f"Unknown scheduler job id: {job_id}")
+
+    return profile_name, profile
 
 
 SCHEDULE_CONFIG = [
