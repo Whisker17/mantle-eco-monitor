@@ -259,7 +259,7 @@ def build_scheduler(settings: Settings | None = None) -> Scheduler:
         if trigger is None:
             continue
 
-        scheduler.configure_task(job_id, func=JOB_REGISTRY[job_id])
+        scheduler.configure_task(job_id, func=JOB_REGISTRY[job_id], job_executor="async")
         scheduler.add_schedule(
             job_id,
             trigger=trigger,

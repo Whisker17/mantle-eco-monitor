@@ -68,6 +68,18 @@ def test_build_scheduler_registers_daily_summary_with_prod_cron():
     assert isinstance(schedule_by_id["daily_summary"].trigger, CronTrigger)
 
 
+def test_build_scheduler_registers_async_executor_for_all_tasks():
+    class FakeSettings:
+        scheduler_profile = "prod"
+        scheduler_config_path = "config/scheduler.toml"
+
+    scheduler = build_scheduler(FakeSettings())
+    tasks = {task.id: task for task in scheduler.get_tasks()}
+
+    assert tasks
+    assert {task.job_executor for task in tasks.values()} == {"async"}
+
+
 def test_build_scheduler_skips_disabled_jobs(tmp_path):
     config_path = tmp_path / "scheduler.toml"
     config_path.write_text(
