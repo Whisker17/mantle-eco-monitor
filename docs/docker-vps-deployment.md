@@ -84,7 +84,24 @@ curl http://127.0.0.1:8000/api/health
 curl http://127.0.0.1:8000/api/health/sources
 ```
 
-## 6. Stop The Stack
+## 6. Admin CLI
+
+For inspection, manual collection, and seed scenarios, use:
+
+```bash
+docker compose exec app python -m src.admin inspect overview
+docker compose exec app python -m src.admin inspect snapshots --entity mantle --metric tvl --limit 10
+docker compose exec app python -m src.admin inspect alerts --entity mantle --metric tvl --limit 10
+docker compose exec app python -m src.admin inspect runs --source defillama --limit 10
+docker compose exec app python -m src.admin collect job core_defillama
+docker compose exec app python -m src.admin collect job core_defillama --dry-run
+docker compose exec app python -m src.admin seed alert-spike --entity mantle --metric tvl --previous 1000000000 --current 1500000000
+docker compose exec app python -m src.admin seed alert-spike --entity mantle --metric tvl --previous 1000000000 --current 1500000000 --no-evaluate-rules
+```
+
+`seed alert-spike` inserts snapshots by default and evaluates rules to persist matching alerts. Use `--no-evaluate-rules` if you only want test snapshots without creating `alert_events`.
+
+## 7. Stop The Stack
 
 ```bash
 docker compose down
@@ -96,7 +113,7 @@ To also remove the database volume:
 docker compose down -v
 ```
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 If startup fails:
 
