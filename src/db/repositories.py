@@ -89,15 +89,28 @@ async def upsert_snapshots(
                 created_at=datetime.now(tz=timezone.utc),
             )
             session.add(snapshot)
+            inserted.append(snapshot)
         else:
+            formatted_value = formatted_values.get(rec.metric_name)
+            if (
+                snapshot.value == rec.value
+                and snapshot.formatted_value == formatted_value
+                and snapshot.unit == rec.unit
+                and snapshot.source_platform == rec.source_platform
+                and snapshot.source_ref == rec.source_ref
+                and snapshot.collected_at == rec.collected_at
+                and snapshot.collected_day == collected_day
+            ):
+                continue
+
             snapshot.value = rec.value
-            snapshot.formatted_value = formatted_values.get(rec.metric_name)
+            snapshot.formatted_value = formatted_value
             snapshot.unit = rec.unit
             snapshot.source_platform = rec.source_platform
             snapshot.source_ref = rec.source_ref
             snapshot.collected_at = rec.collected_at
             snapshot.collected_day = collected_day
-        inserted.append(snapshot)
+            inserted.append(snapshot)
 
     await session.flush()
     return inserted

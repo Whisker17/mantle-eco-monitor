@@ -98,6 +98,23 @@ async def test_snapshot_repository_updates_existing_daily_snapshot(async_session
 
 
 @pytest.mark.asyncio
+async def test_snapshot_repository_skips_identical_daily_snapshot(async_session):
+    now = datetime.now(tz=timezone.utc)
+    r1 = _make_record(value="100", collected_at=now)
+    r2 = _make_record(value="100", collected_at=now)
+
+    inserted1 = await upsert_snapshots(async_session, [r1])
+    await async_session.commit()
+    inserted2 = await upsert_snapshots(async_session, [r2])
+    await async_session.commit()
+    stored = (await async_session.execute(select(MetricSnapshot))).scalars().all()
+
+    assert len(inserted1) == 1
+    assert inserted2 == []
+    assert len(stored) == 1
+
+
+@pytest.mark.asyncio
 async def test_metric_sync_state_repository_tracks_last_synced_date(async_session):
     await upsert_metric_sync_state(
         async_session,

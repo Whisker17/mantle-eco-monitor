@@ -338,6 +338,53 @@ async def test_run_collection_job_only_evaluates_latest_inserted_snapshot_per_me
 
 
 @pytest.mark.asyncio
+async def test_run_collection_job_skips_identical_historical_replay(session_factory):
+    now = datetime.now(tz=timezone.utc)
+    records = [
+        MetricRecord(
+            scope="core",
+            entity="mantle",
+            metric_name="daily_active_users",
+            value=Decimal("100"),
+            unit="count",
+            source_platform="growthepie",
+            source_ref=None,
+            collected_at=now - timedelta(days=2),
+        ),
+        MetricRecord(
+            scope="core",
+            entity="mantle",
+            metric_name="daily_active_users",
+            value=Decimal("150"),
+            unit="count",
+            source_platform="growthepie",
+            source_ref=None,
+            collected_at=now - timedelta(days=1),
+        ),
+    ]
+
+    collector = FakeCollector(source_platform="growthepie", records=records)
+
+    first = await run_collection_job("core_growthepie", collector, session_factory)
+    second = await run_collection_job("core_growthepie", collector, session_factory)
+
+    assert first.records_collected == 2
+    assert second.records_collected == 0
+    assert second.alerts_created == 0
+
+    async with session_factory() as session:
+        snapshots = (
+            await session.execute(
+                select(MetricSnapshot)
+                .where(MetricSnapshot.metric_name == "daily_active_users")
+                .order_by(MetricSnapshot.collected_day.asc())
+            )
+        ).scalars().all()
+
+    assert len(snapshots) == 2
+
+
+@pytest.mark.asyncio
 async def test_run_collection_job_persists_dune_stablecoin_transfer_volume(session_factory):
     now = datetime.now(tz=timezone.utc)
     collector = FakeCollector(
