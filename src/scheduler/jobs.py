@@ -74,6 +74,7 @@ async def core_dune_job():
         DuneSyncService(
             settings=settings,
             session_factory=session_factory,
+            allow_bootstrap=False,
         ),
         session_factory,
         notification_service=_get_notification_service(settings, session_factory),

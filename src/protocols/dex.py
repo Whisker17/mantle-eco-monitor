@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
@@ -10,7 +9,7 @@ from src.ingestion.base import MetricRecord
 from src.ingestion.defillama import MANTLE_DEX_OVERVIEW_PATH, extract_mantle_dex_protocol_volume
 from src.protocols.base import ProtocolAdapter
 
-logger = logging.getLogger(__name__)
+UNSAFE_MULTICHAIN_VOLUME_HISTORY_SLUGS = {"uniswap-v3", "woofi-swap"}
 
 
 class DexAdapter(ProtocolAdapter):
@@ -50,6 +49,37 @@ class DexAdapter(ProtocolAdapter):
             )
         ]
 
+    async def collect_tvl_history(
+        self,
+        http: httpx.AsyncClient,
+        *,
+        days: int,
+        today: date | None = None,
+    ) -> list[MetricRecord]:
+        resp = await http.get(f"https://api.llama.fi/protocol/{self._slug}")
+        resp.raise_for_status()
+        data = resp.json()
+        mantle_data = data.get("chainTvls", {}).get("Mantle", {}).get("tvl", [])
+        records: list[MetricRecord] = []
+        for row in mantle_data:
+            timestamp = row.get("date")
+            total_liquidity = row.get("totalLiquidityUSD")
+            if timestamp is None or total_liquidity is None:
+                continue
+            records.append(
+                MetricRecord(
+                    scope="ecosystem",
+                    entity=self._slug,
+                    metric_name="tvl",
+                    value=Decimal(str(total_liquidity)),
+                    unit="usd",
+                    source_platform="defillama",
+                    source_ref=f"https://defillama.com/protocol/{self._slug}",
+                    collected_at=datetime.fromtimestamp(timestamp, tz=timezone.utc),
+                )
+            )
+        return self._filter_records(records, days=days, today=today)
+
     async def _collect_volume(self, http: httpx.AsyncClient) -> list[MetricRecord]:
         resp = await http.get(f"https://api.llama.fi{MANTLE_DEX_OVERVIEW_PATH}")
         resp.raise_for_status()
@@ -66,3 +96,47 @@ class DexAdapter(ProtocolAdapter):
                 collected_at=datetime.now(tz=timezone.utc),
             )
         ]
+
+    async def collect_volume_history(
+        self,
+        http: httpx.AsyncClient,
+        *,
+        days: int,
+        today: date | None = None,
+    ) -> list[MetricRecord]:
+        if self._slug in UNSAFE_MULTICHAIN_VOLUME_HISTORY_SLUGS:
+            return []
+
+        resp = await http.get(f"https://api.llama.fi/summary/dexs/{self._slug}")
+        resp.raise_for_status()
+        data = resp.json()
+        chart = data.get("totalDataChart", [])
+        records: list[MetricRecord] = []
+        for row in chart:
+            if len(row) < 2:
+                continue
+            timestamp, value = row[0], row[1]
+            records.append(
+                MetricRecord(
+                    scope="ecosystem",
+                    entity=self._slug,
+                    metric_name="volume",
+                    value=Decimal(str(value)),
+                    unit="usd",
+                    source_platform="defillama",
+                    source_ref=f"https://defillama.com/dexs/protocol/{self._slug}",
+                    collected_at=datetime.fromtimestamp(timestamp, tz=timezone.utc),
+                )
+            )
+        return self._filter_records(records, days=days, today=today)
+
+    def _filter_records(
+        self,
+        records: list[MetricRecord],
+        *,
+        days: int,
+        today: date | None = None,
+    ) -> list[MetricRecord]:
+        anchor = today or datetime.now(tz=timezone.utc).date()
+        cutoff = anchor - timedelta(days=max(days, 0))
+        return [record for record in records if record.collected_at.date() >= cutoff]

@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 import httpx
@@ -29,6 +30,10 @@ def sample_defillama_tvl_payload():
 @pytest.fixture()
 def sample_defillama_stablecoin_payload():
     return [
+        {
+            "date": "1710288000",
+            "totalCirculatingUSD": {"peggedUSD": 450_000_000},
+        },
         {
             "date": "1710374400",
             "totalCirculatingUSD": {"peggedUSD": 500_000_000},
@@ -107,12 +112,34 @@ async def test_defillama_collector_maps_stablecoin_supply(defillama_collector):
 
 
 @pytest.mark.asyncio
+async def test_defillama_collector_collect_stablecoin_supply_history_maps_recent_window(
+    defillama_collector,
+):
+    records = await defillama_collector.collect_stablecoin_supply_history(days=7, today=date(2024, 3, 14))
+
+    assert len(records) == 2
+    assert [record.value for record in records] == [Decimal("450000000"), Decimal("500000000")]
+    assert all(record.metric_name == "stablecoin_supply" for record in records)
+
+
+@pytest.mark.asyncio
 async def test_defillama_collector_maps_stablecoin_mcap(defillama_collector):
     records = await defillama_collector._collect_stablecoin_mcap()
 
     assert len(records) == 1
     assert records[0].metric_name == "stablecoin_mcap"
     assert records[0].value == Decimal("500000000")
+
+
+@pytest.mark.asyncio
+async def test_defillama_collector_collect_stablecoin_mcap_history_reuses_chain_history(
+    defillama_collector,
+):
+    records = await defillama_collector.collect_stablecoin_mcap_history(days=7, today=date(2024, 3, 14))
+
+    assert len(records) == 2
+    assert [record.value for record in records] == [Decimal("450000000"), Decimal("500000000")]
+    assert all(record.metric_name == "stablecoin_mcap" for record in records)
 
 
 @pytest.mark.asyncio
@@ -124,6 +151,15 @@ async def test_defillama_collect_returns_all_core_metrics(defillama_collector):
     assert "stablecoin_supply" in names
     assert "stablecoin_mcap" in names
     assert "dex_volume" in names
+
+
+@pytest.mark.asyncio
+async def test_defillama_collector_collect_chain_dex_volume_history_maps_recent_window(defillama_collector):
+    records = await defillama_collector.collect_chain_dex_volume_history(days=7, today=date(2024, 3, 14))
+
+    assert len(records) == 2
+    assert [record.value for record in records] == [Decimal("28000000"), Decimal("32000000")]
+    assert all(record.metric_name == "dex_volume" for record in records)
 
 
 def test_defillama_source_platform():

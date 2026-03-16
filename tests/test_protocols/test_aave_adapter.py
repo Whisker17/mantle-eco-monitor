@@ -1,5 +1,7 @@
+from datetime import date
 from decimal import Decimal
 
+import httpx
 import pytest
 
 from src.protocols.aave import AaveAdapter
@@ -88,3 +90,37 @@ def test_aave_adapter_slug_and_tier():
 
 def test_aave_adapter_uses_current_defillama_protocol_path():
     assert AaveAdapter.DEFILLAMA_URL == "https://api.llama.fi/protocol/aave-v3"
+
+
+@pytest.mark.asyncio
+async def test_aave_adapter_collect_history_maps_recent_series():
+    payload = {
+        "chainTvls": {
+            "Mantle": {
+                "tvl": [
+                    {"date": 1741564800, "totalLiquidityUSD": 200_000_000},  # 2025-03-10
+                    {"date": 1748908800, "totalLiquidityUSD": 245_000_000},  # 2025-06-03
+                ],
+            },
+            "Mantle-borrowed": {
+                "tvl": [
+                    {"date": 1741564800, "totalLiquidityUSD": 70_000_000},
+                    {"date": 1748908800, "totalLiquidityUSD": 89_000_000},
+                ],
+            },
+        }
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    adapter = AaveAdapter()
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    records = await adapter.collect_history(http, days=90, today=date(2025, 6, 3))
+
+    assert len(records) == 8
+    by_key = {(record.metric_name, record.collected_at.date().isoformat()): record for record in records}
+    assert by_key[("tvl", "2025-03-10")].value == Decimal("200000000")
+    assert by_key[("supply", "2025-06-03")].value == Decimal("245000000")
+    assert by_key[("borrowed", "2025-06-03")].value == Decimal("89000000")

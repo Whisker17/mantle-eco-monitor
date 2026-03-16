@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 import httpx
@@ -41,6 +42,33 @@ async def test_l2beat_collector_maps_total_value_secured(l2beat_collector):
     assert records[0].entity == "mantle"
     assert records[0].scope == "core"
     assert records[0].unit == "usd"
+
+
+@pytest.mark.asyncio
+async def test_l2beat_collector_collect_history_filters_to_recent_90_day_window():
+    payload = {
+        "success": True,
+        "data": {
+            "chart": {
+                "data": [
+                    [1735516800, 10, 20, 30, 0],  # 2024-12-30
+                    [1741132800, 11, 21, 31, 0],  # 2025-03-05
+                    [1748908800, 12, 22, 32, 0],  # 2025-06-03
+                ]
+            },
+        },
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    collector = L2BeatCollector(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+    records = await collector.collect_total_value_secured_history(days=90, today=date(2025, 6, 3))
+
+    assert len(records) == 2
+    assert [record.value for record in records] == [Decimal("63"), Decimal("66")]
+    assert all(record.metric_name == "total_value_secured" for record in records)
 
 
 def test_l2beat_source_platform():

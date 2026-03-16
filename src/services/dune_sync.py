@@ -95,14 +95,21 @@ class DuneSyncService:
         session_factory: async_sessionmaker[AsyncSession],
         client: DuneClient | None = None,
         metric_specs: tuple[DuneMetricSpec, ...] = DUNE_METRIC_SPECS,
+        allow_bootstrap: bool = True,
     ):
         self._settings = settings
         self._session_factory = session_factory
         self._client = client or DuneClient(settings.dune_api_key)
         self._collector = DuneCollector(self._client, settings)
         self._metric_specs = {spec.metric_name: spec for spec in metric_specs}
+        self._allow_bootstrap = allow_bootstrap
 
-    async def sync_all(self, *, today: date | None = None) -> DuneSyncResult:
+    async def sync_all(
+        self,
+        *,
+        today: date | None = None,
+        allow_bootstrap: bool | None = None,
+    ) -> DuneSyncResult:
         metric_results: list[DuneMetricSyncResult] = []
         failed_metrics: dict[str, str] = {}
 
@@ -110,7 +117,13 @@ class DuneSyncService:
             if not getattr(self._settings, spec.settings_attr, 0):
                 continue
             try:
-                metric_results.append(await self.sync_metric(spec.metric_name, today=today))
+                metric_results.append(
+                    await self.sync_metric(
+                        spec.metric_name,
+                        today=today,
+                        allow_bootstrap=allow_bootstrap,
+                    )
+                )
             except Exception as exc:
                 failed_metrics[spec.metric_name] = str(exc)
 
@@ -127,6 +140,7 @@ class DuneSyncService:
         metric_name: str,
         *,
         today: date | None = None,
+        allow_bootstrap: bool | None = None,
     ) -> DuneMetricSyncResult:
         spec = self._metric_specs[metric_name]
         query_id = getattr(self._settings, spec.settings_attr, 0)
@@ -143,6 +157,7 @@ class DuneSyncService:
             )
 
         latest_completed_day = self._latest_completed_day(today)
+        allow_bootstrap = self._allow_bootstrap if allow_bootstrap is None else allow_bootstrap
 
         async with self._session_factory() as session:
             state = await get_metric_sync_state(
@@ -152,7 +167,12 @@ class DuneSyncService:
                 entity=spec.entity,
                 metric_name=spec.metric_name,
             )
-            window = self._build_sync_window(spec, state.last_synced_date if state else None, latest_completed_day)
+            window = self._build_sync_window(
+                spec,
+                state.last_synced_date if state else None,
+                latest_completed_day,
+                allow_bootstrap=allow_bootstrap,
+            )
             if window is None:
                 return DuneMetricSyncResult(
                     metric_name=metric_name,
@@ -228,11 +248,20 @@ class DuneSyncService:
         spec: DuneMetricSpec,
         last_synced_date: date | None,
         latest_completed_day: date,
+        *,
+        allow_bootstrap: bool,
     ) -> _SyncWindow | None:
         if latest_completed_day < spec.bootstrap_start:
             return None
 
         if last_synced_date is None:
+            if not allow_bootstrap:
+                return _SyncWindow(
+                    fetch_start=latest_completed_day,
+                    fetch_end=latest_completed_day,
+                    backlog_days=0,
+                    is_bootstrap=False,
+                )
             return _SyncWindow(
                 fetch_start=spec.bootstrap_start,
                 fetch_end=latest_completed_day,

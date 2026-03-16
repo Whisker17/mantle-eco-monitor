@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 import httpx
@@ -60,6 +61,30 @@ async def test_coingecko_collector_collect_mnt_volume_history_maps_daily_points(
     assert [record.value for record in records] == [Decimal("81000000"), Decimal("95000000")]
     assert all(record.metric_name == "mnt_volume" for record in records)
     assert all(record.entity == "mantle" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_coingecko_collector_collect_mnt_volume_history_filters_recent_window():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/market_chart"):
+            return httpx.Response(
+                200,
+                json={
+                    "total_volumes": [
+                        [1735689600000, 70_000_000],  # 2025-01-01
+                        [1741564800000, 81_000_000],  # 2025-03-10
+                        [1748908800000, 95_000_000],  # 2025-06-03
+                    ]
+                },
+            )
+        return httpx.Response(404, json={})
+
+    collector = CoinGeckoCollector(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+    records = await collector.collect_mnt_volume_history(days=90, today=date(2025, 6, 3))
+
+    assert len(records) == 2
+    assert [record.value for record in records] == [Decimal("81000000"), Decimal("95000000")]
 
 
 def test_coingecko_source_platform():

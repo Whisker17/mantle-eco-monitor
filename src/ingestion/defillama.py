@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
 
 from src.ingestion.base import BaseCollector, MetricRecord
-
-logger = logging.getLogger(__name__)
 
 MANTLE_DEX_OVERVIEW_PATH = "/overview/dexs/Mantle"
 
@@ -78,10 +75,65 @@ class DefiLlamaCollector(BaseCollector):
             )
         return records
 
-    async def _collect_stablecoin_supply(self) -> list[MetricRecord]:
+    async def collect_stablecoin_supply_history(
+        self,
+        *,
+        days: int,
+        today: date | None = None,
+    ) -> list[MetricRecord]:
+        return await self._map_stablecoin_history(
+            metric_name="stablecoin_supply",
+            days=days,
+            today=today,
+        )
+
+    async def collect_stablecoin_mcap_history(
+        self,
+        *,
+        days: int,
+        today: date | None = None,
+    ) -> list[MetricRecord]:
+        return await self._map_stablecoin_history(
+            metric_name="stablecoin_mcap",
+            days=days,
+            today=today,
+        )
+
+    async def _fetch_stablecoin_chart_rows(self) -> list[dict]:
         resp = await self._http.get(f"{self.STABLES_BASE}/stablecoincharts/Mantle")
         resp.raise_for_status()
-        data = resp.json()
+        return resp.json()
+
+    async def _map_stablecoin_history(
+        self,
+        *,
+        metric_name: str,
+        days: int,
+        today: date | None,
+    ) -> list[MetricRecord]:
+        data = await self._fetch_stablecoin_chart_rows()
+        records: list[MetricRecord] = []
+        for row in data:
+            timestamp = row.get("date")
+            total = row.get("totalCirculatingUSD", {}).get("peggedUSD")
+            if timestamp is None or total is None:
+                continue
+            records.append(
+                MetricRecord(
+                    scope="core",
+                    entity="mantle",
+                    metric_name=metric_name,
+                    value=Decimal(str(total)),
+                    unit="usd",
+                    source_platform="defillama",
+                    source_ref=None,
+                    collected_at=datetime.fromtimestamp(int(timestamp), tz=timezone.utc),
+                )
+            )
+        return self._filter_records_by_window(records, days=days, today=today)
+
+    async def _collect_stablecoin_supply(self) -> list[MetricRecord]:
+        data = await self._fetch_stablecoin_chart_rows()
         if not data:
             return []
         latest = data[-1]
@@ -125,6 +177,35 @@ class DefiLlamaCollector(BaseCollector):
                 collected_at=collected_at,
             )
         ]
+
+    async def collect_chain_dex_volume_history(
+        self,
+        *,
+        days: int,
+        today: date | None = None,
+    ) -> list[MetricRecord]:
+        resp = await self._http.get(f"{self.BASE}{MANTLE_DEX_OVERVIEW_PATH}")
+        resp.raise_for_status()
+        data = resp.json()
+        chart = data.get("totalDataChart", [])
+        records: list[MetricRecord] = []
+        for row in chart:
+            if len(row) < 2:
+                continue
+            timestamp, value = row[0], row[1]
+            records.append(
+                MetricRecord(
+                    scope="core",
+                    entity="mantle",
+                    metric_name="dex_volume",
+                    value=Decimal(str(value)),
+                    unit="usd",
+                    source_platform="defillama",
+                    source_ref="https://defillama.com/chain/Mantle?flows=false&dexs=true",
+                    collected_at=datetime.fromtimestamp(timestamp, tz=timezone.utc),
+                )
+            )
+        return self._filter_records_by_window(records, days=days, today=today)
 
     async def _collect_stablecoin_mcap(self) -> list[MetricRecord]:
         resp = await self._http.get(f"{self.STABLES_BASE}/stablecoinchains")
@@ -194,3 +275,14 @@ class DefiLlamaCollector(BaseCollector):
             return resp.status_code == 200
         except Exception:
             return False
+
+    def _filter_records_by_window(
+        self,
+        records: list[MetricRecord],
+        *,
+        days: int,
+        today: date | None = None,
+    ) -> list[MetricRecord]:
+        anchor = today or datetime.now(tz=timezone.utc).date()
+        cutoff = anchor - timedelta(days=max(days, 0))
+        return [record for record in records if record.collected_at.date() >= cutoff]

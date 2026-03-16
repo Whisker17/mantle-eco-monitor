@@ -78,6 +78,16 @@ def test_admin_cli_parses_rebuild_data_quality_history_command():
     assert args.rebuild_command == "data-quality-history"
 
 
+def test_admin_cli_parses_bootstrap_initial_history_command():
+    parser = _build_parser()
+
+    args = parser.parse_args(["bootstrap", "initial-history", "--apply"])
+
+    assert args.command == "bootstrap"
+    assert args.bootstrap_command == "initial-history"
+    assert args.apply is True
+
+
 @pytest.mark.asyncio
 async def test_admin_runtime_runs_async_handler():
     calls: list[argparse.Namespace] = []

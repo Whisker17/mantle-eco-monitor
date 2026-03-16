@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
 
 from src.ingestion.base import BaseCollector, MetricRecord
-
-logger = logging.getLogger(__name__)
 
 
 class CoinGeckoCollector(BaseCollector):
@@ -53,7 +50,12 @@ class CoinGeckoCollector(BaseCollector):
 
         return records
 
-    async def collect_mnt_volume_history(self) -> list[MetricRecord]:
+    async def collect_mnt_volume_history(
+        self,
+        *,
+        days: int | None = None,
+        today: date | None = None,
+    ) -> list[MetricRecord]:
         resp = await self._http.get(
             f"{self.BASE}/coins/mantle/market_chart",
             params={
@@ -64,7 +66,12 @@ class CoinGeckoCollector(BaseCollector):
         )
         resp.raise_for_status()
         data = resp.json()
-        return self._map_volume_history(data.get("total_volumes", []))
+        records = self._map_volume_history(data.get("total_volumes", []))
+        if days is None:
+            return records
+        anchor = today or datetime.now(tz=timezone.utc).date()
+        cutoff = anchor - timedelta(days=max(days, 0))
+        return [record for record in records if record.collected_at.date() >= cutoff]
 
     def _map_volume_history(self, rows: list[list[float | int]]) -> list[MetricRecord]:
         records: list[MetricRecord] = []

@@ -142,6 +142,50 @@ async def test_dune_sync_service_bootstraps_metric_from_start_date(session_facto
 
 
 @pytest.mark.asyncio
+async def test_dune_sync_service_without_state_fetches_only_latest_day_in_incremental_mode(session_factory):
+    client = FakeDuneClient(
+        {
+            (
+                42,
+                "2026-03-04",
+                "2026-03-04",
+            ): [
+                _row("2026-03-04", 160),
+            ]
+        }
+    )
+    service = DuneSyncService(
+        settings=FakeSettings(),
+        session_factory=session_factory,
+        client=client,
+        metric_specs=_specs(date(2026, 3, 1)),
+    )
+
+    result = await service.sync_metric(
+        "daily_active_users",
+        today=date(2026, 3, 5),
+        allow_bootstrap=False,
+    )
+
+    assert result.is_bootstrap is False
+    assert result.fetch_start == date(2026, 3, 4)
+    assert result.fetch_end == date(2026, 3, 4)
+    assert result.records_written == 1
+
+    async with session_factory() as session:
+        state = await get_metric_sync_state(
+            session,
+            source_platform="dune",
+            scope="core",
+            entity="mantle",
+            metric_name="daily_active_users",
+        )
+
+    assert state is not None
+    assert state.last_synced_date == date(2026, 3, 4)
+
+
+@pytest.mark.asyncio
 async def test_dune_sync_service_catches_up_missing_days_with_correction_window(session_factory):
     async with session_factory() as session:
         await upsert_metric_sync_state(

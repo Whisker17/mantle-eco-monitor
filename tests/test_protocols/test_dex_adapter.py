@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 import httpx
@@ -107,3 +108,50 @@ async def test_dex_adapter_keeps_tvl_when_volume_endpoint_is_missing():
     assert len(records) == 1
     assert records[0].metric_name == "tvl"
     assert records[0].value == Decimal("12500000")
+
+
+@pytest.mark.asyncio
+async def test_dex_adapter_collect_volume_history_uses_summary_chart_for_single_chain_dex():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/summary/dexs/merchant-moe-dex":
+            return httpx.Response(
+                200,
+                json={
+                    "totalDataChart": [
+                        [1741564800, 8_000_000],
+                        [1748908800, 8_250_000],
+                    ]
+                },
+            )
+        return httpx.Response(404, json={})
+
+    adapter = DexAdapter("merchant-moe-dex")
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    records = await adapter.collect_volume_history(http, days=90, today=date(2025, 6, 3))
+
+    assert len(records) == 2
+    assert [record.value for record in records] == [Decimal("8000000"), Decimal("8250000")]
+
+
+@pytest.mark.asyncio
+async def test_dex_adapter_collect_volume_history_skips_multichain_protocol_history():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/summary/dexs/uniswap-v3":
+            return httpx.Response(
+                200,
+                json={
+                    "totalDataChart": [
+                        [1741564800, 490_000_000],
+                        [1748908800, 492_677_436],
+                    ]
+                },
+            )
+        return httpx.Response(404, json={})
+
+    adapter = DexAdapter("uniswap-v3")
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    records = await adapter.collect_volume_history(http, days=90, today=date(2025, 6, 3))
+
+    assert records == []

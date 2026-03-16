@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 import httpx
@@ -68,4 +69,50 @@ async def test_growthepie_collect_uses_current_public_fundamentals_endpoint(samp
     assert {r.metric_name for r in records} == {
         "chain_transactions",
         "mnt_market_cap",
+    }
+
+
+@pytest.mark.asyncio
+async def test_growthepie_collect_returns_only_latest_mantle_day():
+    payload = [
+        {"origin_key": "mantle", "metric_key": "txcount", "value": 100000, "date": "2026-03-15"},
+        {"origin_key": "mantle", "metric_key": "market_cap_usd", "value": 2200000000, "date": "2026-03-15"},
+        {"origin_key": "mantle", "metric_key": "txcount", "value": 150000, "date": "2026-03-16"},
+        {"origin_key": "mantle", "metric_key": "market_cap_usd", "value": 2300000000, "date": "2026-03-16"},
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    collector = GrowthepieCollector(http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+    records = await collector.collect()
+
+    assert len(records) == 2
+    assert {record.metric_name: record.value for record in records} == {
+        "chain_transactions": Decimal("150000"),
+        "mnt_market_cap": Decimal("2300000000"),
+    }
+
+
+def test_growthepie_collect_history_filters_to_recent_90_day_window():
+    payload = [
+        {"origin_key": "mantle", "metric_key": "txcount", "value": 100000, "date": "2025-01-01"},
+        {"origin_key": "mantle", "metric_key": "market_cap_usd", "value": 2100000000, "date": "2025-01-01"},
+        {"origin_key": "mantle", "metric_key": "txcount", "value": 120000, "date": "2025-03-10"},
+        {"origin_key": "mantle", "metric_key": "market_cap_usd", "value": 2200000000, "date": "2025-03-10"},
+        {"origin_key": "mantle", "metric_key": "txcount", "value": 150000, "date": "2025-06-03"},
+        {"origin_key": "mantle", "metric_key": "market_cap_usd", "value": 2300000000, "date": "2025-06-03"},
+    ]
+
+    collector = GrowthepieCollector()
+
+    records = collector.collect_history(payload, days=90, today=date(2025, 6, 3))
+
+    assert len(records) == 4
+    assert {(record.metric_name, str(record.value)) for record in records} == {
+        ("chain_transactions", "120000"),
+        ("mnt_market_cap", "2200000000"),
+        ("chain_transactions", "150000"),
+        ("mnt_market_cap", "2300000000"),
     }

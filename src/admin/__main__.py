@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from src.admin.bootstrap import bootstrap_initial_history
 from src.admin.collect import collect_job
 from src.admin.inspect import inspect_alerts, inspect_overview, inspect_runs, inspect_snapshots
 from src.admin.rebuild import rebuild_data_quality_history
@@ -59,6 +60,11 @@ def _build_parser() -> argparse.ArgumentParser:
     data_quality_parser = rebuild_subparsers.add_parser("data-quality-history")
     data_quality_parser.add_argument("--apply", action="store_true")
     data_quality_parser.add_argument("--run-jobs", action="store_true")
+
+    bootstrap_parser = subparsers.add_parser("bootstrap")
+    bootstrap_subparsers = bootstrap_parser.add_subparsers(dest="bootstrap_command", required=True)
+    initial_history_parser = bootstrap_subparsers.add_parser("initial-history")
+    initial_history_parser.add_argument("--apply", action="store_true")
 
     return parser
 
@@ -128,6 +134,16 @@ def main(argv: list[str] | None = None) -> int:
                 settings=settings,
                 apply=command_args.apply,
                 run_jobs=command_args.run_jobs,
+            )
+        elif command_args.command == "bootstrap":
+            settings = load_settings()
+            session_factory = build_admin_session_factory(settings)
+            if command_args.bootstrap_command != "initial-history":
+                raise SystemExit(f"Unknown bootstrap command: {command_args.bootstrap_command}")
+            result = await bootstrap_initial_history(
+                session_factory,
+                settings=settings,
+                apply=command_args.apply,
             )
         else:
             raise SystemExit(f"Unknown command: {command_args.command}")
