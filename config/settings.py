@@ -5,7 +5,12 @@ class Settings(BaseSettings):
     database_url: str
     dune_api_key: str = ""
     coingecko_api_key: str = ""
+    dune_daily_active_users_query_id: int = 0
+    dune_active_addresses_query_id: int = 0
+    dune_chain_transactions_query_id: int = 0
     dune_stablecoin_volume_query_id: int = 0
+    dune_sync_correction_lookback_days: int = 2
+    dune_sync_chunk_days: int = 31
     ai_enrichment_enabled: bool = False
     lark_delivery_enabled: bool = False
     lark_bot_enabled: bool = False

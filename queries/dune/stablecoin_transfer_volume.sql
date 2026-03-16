@@ -21,9 +21,9 @@ select
   count(distinct t.evt_tx_hash) as tx_count
 from erc20_mantle.evt_Transfer t
 inner join stablecoins s on t.contract_address = s.contract_address
-where t.evt_block_time >= date_trunc('day', now()) - interval '30' day
-  and t.evt_block_time < date_trunc('day', now())
+where t.evt_block_time >= cast('{{start_date}}' as timestamp)
+  and t.evt_block_time < cast('{{end_date}}' as timestamp) + interval '1' day
   and t."from" != 0x0000000000000000000000000000000000000000
   and t."to" != 0x0000000000000000000000000000000000000000
 group by 1, 2
-order by 1 desc, volume desc
+order by 1 asc, volume desc

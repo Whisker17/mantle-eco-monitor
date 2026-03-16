@@ -1,22 +1,33 @@
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from src.db.models import Base, AlertEvent, DeliveryEvent, MetricSnapshot, SourceRun, WatchlistProtocol
+from src.db.models import (
+    Base,
+    AlertEvent,
+    DeliveryEvent,
+    MetricSnapshot,
+    MetricSyncState,
+    SourceRun,
+    WatchlistProtocol,
+)
 from src.db.repositories import (
     TimeWindow,
     create_delivery_event,
     get_comparison_snapshot,
     get_delivery_event_by_logical_key,
+    get_metric_sync_state,
     get_previous_snapshot,
     insert_alert,
     insert_snapshots,
     insert_source_run,
     mark_delivery_event_delivered,
     mark_delivery_event_failed,
+    upsert_metric_sync_state,
+    upsert_snapshots,
     upsert_watchlist,
 )
 from src.ingestion.base import MetricRecord
@@ -69,18 +80,64 @@ async def test_snapshot_repository_inserts_records(async_session):
 
 
 @pytest.mark.asyncio
-async def test_snapshot_repository_skips_duplicate_daily_snapshot(async_session):
+async def test_snapshot_repository_updates_existing_daily_snapshot(async_session):
     now = datetime.now(tz=timezone.utc)
     r1 = _make_record(value="100", collected_at=now)
     r2 = _make_record(value="200", collected_at=now + timedelta(hours=2))
 
-    inserted1 = await insert_snapshots(async_session, [r1])
+    inserted1 = await upsert_snapshots(async_session, [r1])
     await async_session.commit()
-    inserted2 = await insert_snapshots(async_session, [r2])
+    inserted2 = await upsert_snapshots(async_session, [r2])
     await async_session.commit()
+    stored = (await async_session.execute(select(MetricSnapshot))).scalars().all()
 
     assert len(inserted1) == 1
-    assert len(inserted2) == 0  # deduped
+    assert len(inserted2) == 1
+    assert len(stored) == 1
+    assert stored[0].value == Decimal("200")
+
+
+@pytest.mark.asyncio
+async def test_snapshot_repository_skips_identical_daily_snapshot(async_session):
+    now = datetime.now(tz=timezone.utc)
+    r1 = _make_record(value="100", collected_at=now)
+    r2 = _make_record(value="100", collected_at=now)
+
+    inserted1 = await upsert_snapshots(async_session, [r1])
+    await async_session.commit()
+    inserted2 = await upsert_snapshots(async_session, [r2])
+    await async_session.commit()
+    stored = (await async_session.execute(select(MetricSnapshot))).scalars().all()
+
+    assert len(inserted1) == 1
+    assert inserted2 == []
+    assert len(stored) == 1
+
+
+@pytest.mark.asyncio
+async def test_metric_sync_state_repository_tracks_last_synced_date(async_session):
+    await upsert_metric_sync_state(
+        async_session,
+        source_platform="dune",
+        scope="core",
+        entity="mantle",
+        metric_name="daily_active_users",
+        last_synced_date=date(2026, 3, 12),
+        last_sync_status="success",
+    )
+    await async_session.commit()
+
+    state = await get_metric_sync_state(
+        async_session,
+        source_platform="dune",
+        scope="core",
+        entity="mantle",
+        metric_name="daily_active_users",
+    )
+
+    assert state is not None
+    assert isinstance(state, MetricSyncState)
+    assert state.last_synced_date == date(2026, 3, 12)
 
 
 @pytest.mark.asyncio

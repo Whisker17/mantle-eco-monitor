@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import httpx
@@ -11,9 +13,24 @@ from src.ingestion.base import BaseCollector, MetricRecord
 
 logger = logging.getLogger(__name__)
 
-METRIC_QUERY_MAP = {
-    "stablecoin_transfer_volume": "dune_stablecoin_volume_query_id",
-}
+
+@dataclass(frozen=True)
+class DuneMetricSpec:
+    metric_name: str
+    settings_attr: str
+    scope: str = "core"
+    entity: str = "mantle"
+    bootstrap_start: date = date(2023, 7, 17)
+
+
+DUNE_METRIC_SPECS = (
+    DuneMetricSpec("daily_active_users", "dune_daily_active_users_query_id"),
+    DuneMetricSpec("active_addresses", "dune_active_addresses_query_id"),
+    DuneMetricSpec("chain_transactions", "dune_chain_transactions_query_id"),
+    DuneMetricSpec("stablecoin_transfer_volume", "dune_stablecoin_volume_query_id"),
+)
+
+METRIC_QUERY_MAP = {spec.metric_name: spec.settings_attr for spec in DUNE_METRIC_SPECS}
 
 METRIC_UNITS = {
     "daily_active_users": "count",
@@ -27,6 +44,12 @@ METRIC_UNITS = {
 
 class DuneClient:
     BASE_URL = "https://api.dune.com/api/v1"
+    TERMINAL_STATES = {"QUERY_STATE_COMPLETED", "QUERY_STATE_COMPLETED_PARTIAL"}
+    FAILURE_STATES = {
+        "QUERY_STATE_FAILED",
+        "QUERY_STATE_CANCELLED",
+        "QUERY_STATE_EXPIRED",
+    }
 
     def __init__(self, api_key: str, http_client: httpx.AsyncClient | None = None):
         self.api_key = api_key
@@ -43,6 +66,56 @@ class DuneClient:
     async def get_latest_result(self, query_id: int) -> list[dict]:
         http = await self._get_http()
         resp = await http.get(f"{self.BASE_URL}/query/{query_id}/results")
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("result", {}).get("rows", [])
+
+    async def get_query_result(
+        self,
+        query_id: int,
+        *,
+        params: dict[str, str] | None = None,
+    ) -> list[dict]:
+        if not params:
+            return await self.get_latest_result(query_id)
+
+        execution_id = await self._execute_query(query_id, params=params)
+        await self._wait_for_execution(execution_id)
+        return await self._get_execution_results(execution_id)
+
+    async def _execute_query(self, query_id: int, *, params: dict[str, str]) -> str:
+        http = await self._get_http()
+        resp = await http.post(
+            f"{self.BASE_URL}/query/{query_id}/execute",
+            json={
+                "query_parameters": params,
+                "performance": "medium",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        execution_id = data.get("execution_id")
+        if not execution_id:
+            raise RuntimeError(f"Dune query {query_id} did not return an execution_id")
+        return str(execution_id)
+
+    async def _wait_for_execution(self, execution_id: str) -> None:
+        http = await self._get_http()
+
+        while True:
+            resp = await http.get(f"{self.BASE_URL}/execution/{execution_id}/status")
+            resp.raise_for_status()
+            data = resp.json()
+            state = data.get("state")
+            if state in self.TERMINAL_STATES:
+                return
+            if state in self.FAILURE_STATES:
+                raise RuntimeError(f"Dune execution {execution_id} failed with state {state}")
+            await asyncio.sleep(1)
+
+    async def _get_execution_results(self, execution_id: str) -> list[dict]:
+        http = await self._get_http()
+        resp = await http.get(f"{self.BASE_URL}/execution/{execution_id}/results")
         resp.raise_for_status()
         data = resp.json()
         return data.get("result", {}).get("rows", [])
@@ -217,7 +290,7 @@ class DuneCollector(BaseCollector):
                 logger.warning("No query ID configured for %s, skipping", metric_name)
                 continue
             try:
-                rows = await self._client.get_latest_result(query_id)
+                rows = await self._client.get_query_result(query_id)
                 records.extend(self._map_rows(metric_name, rows))
             except Exception:
                 logger.exception("Failed to collect %s from Dune", metric_name)
@@ -232,3 +305,7 @@ class DuneCollector(BaseCollector):
             except Exception:
                 return False
         return await self._client.health_check()
+
+
+def has_configured_dune_queries(settings: Settings) -> bool:
+    return any(getattr(settings, settings_attr, 0) for settings_attr in METRIC_QUERY_MAP.values())

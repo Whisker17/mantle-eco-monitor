@@ -56,8 +56,8 @@ async def test_daily_summary_service_summarizes_previous_shanghai_day_and_sends_
                     unit="usd",
                     source_platform="defillama",
                     source_ref="https://excluded.example/source",
-                    collected_at=datetime(2026, 3, 14, 15, 30, tzinfo=UTC),
-                    created_at=datetime(2026, 3, 14, 15, 30, tzinfo=UTC),
+                    collected_at=datetime(2026, 3, 13, 15, 30, tzinfo=UTC),
+                    created_at=datetime(2026, 3, 13, 15, 30, tzinfo=UTC),
                 ),
                 MetricSnapshot(
                     scope="core",

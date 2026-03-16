@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.db.models import AlertEvent, Base, MetricSnapshot, SourceRun, WatchlistProtocol
 from src.ingestion.base import BaseCollector, MetricRecord
-from src.scheduler.runtime import refresh_watchlist, run_collection_job, run_source_health_job
+from src.scheduler.runtime import refresh_watchlist, run_collection_job, run_dune_sync_job, run_source_health_job
+from src.services.dune_sync import DuneMetricSyncResult, DuneSyncResult
 
 
 class FakeCollector(BaseCollector):
@@ -83,6 +84,18 @@ class FakeWatchlistManager:
                 }
             )
         return entries
+
+
+class FakeDuneSyncService:
+    def __init__(self, result: DuneSyncResult | None = None, error: Exception | None = None):
+        self._result = result
+        self._error = error
+
+    async def sync_all(self) -> DuneSyncResult:
+        if self._error is not None:
+            raise self._error
+        assert self._result is not None
+        return self._result
 
 
 @pytest.fixture()
@@ -219,6 +232,66 @@ async def test_run_source_health_job_records_each_source_status(session_factory)
 
 
 @pytest.mark.asyncio
+async def test_run_dune_sync_job_records_success_source_run(session_factory):
+    result = DuneSyncResult(
+        metrics_processed=1,
+        records_written=6,
+        alerts_created=0,
+        metric_results=[
+            DuneMetricSyncResult(
+                metric_name="daily_active_users",
+                fetch_start=datetime(2026, 3, 1, tzinfo=timezone.utc).date(),
+                fetch_end=datetime(2026, 3, 6, tzinfo=timezone.utc).date(),
+                advanced_to=datetime(2026, 3, 6, tzinfo=timezone.utc).date(),
+                backlog_days=0,
+                records_written=6,
+                alerts_created=0,
+                is_bootstrap=True,
+            )
+        ],
+    )
+
+    job_result = await run_dune_sync_job(
+        "core_dune",
+        FakeDuneSyncService(result=result),
+        session_factory,
+    )
+
+    assert job_result.status == "success"
+    assert job_result.records_collected == 6
+    assert job_result.alerts_created == 0
+
+    async with session_factory() as session:
+        runs = (await session.execute(select(SourceRun))).scalars().all()
+
+    assert len(runs) == 1
+    assert runs[0].source_platform == "dune"
+    assert runs[0].job_name == "core_dune"
+    assert runs[0].status == "success"
+
+
+@pytest.mark.asyncio
+async def test_run_dune_sync_job_records_failure_source_run(session_factory):
+    job_result = await run_dune_sync_job(
+        "core_dune",
+        FakeDuneSyncService(error=RuntimeError("dune boom")),
+        session_factory,
+    )
+
+    assert job_result.status == "failed"
+    assert job_result.records_collected == 0
+    assert job_result.alerts_created == 0
+    assert "dune boom" in (job_result.error_message or "")
+
+    async with session_factory() as session:
+        runs = (await session.execute(select(SourceRun))).scalars().all()
+
+    assert len(runs) == 1
+    assert runs[0].source_platform == "dune"
+    assert runs[0].status == "failed"
+
+
+@pytest.mark.asyncio
 async def test_run_collection_job_only_evaluates_latest_inserted_snapshot_per_metric(session_factory):
     now = datetime.now(tz=timezone.utc)
 
@@ -262,6 +335,53 @@ async def test_run_collection_job_only_evaluates_latest_inserted_snapshot_per_me
 
     assert result.records_collected == 3
     assert result.alerts_created == 3
+
+
+@pytest.mark.asyncio
+async def test_run_collection_job_skips_identical_historical_replay(session_factory):
+    now = datetime.now(tz=timezone.utc)
+    records = [
+        MetricRecord(
+            scope="core",
+            entity="mantle",
+            metric_name="daily_active_users",
+            value=Decimal("100"),
+            unit="count",
+            source_platform="growthepie",
+            source_ref=None,
+            collected_at=now - timedelta(days=2),
+        ),
+        MetricRecord(
+            scope="core",
+            entity="mantle",
+            metric_name="daily_active_users",
+            value=Decimal("150"),
+            unit="count",
+            source_platform="growthepie",
+            source_ref=None,
+            collected_at=now - timedelta(days=1),
+        ),
+    ]
+
+    collector = FakeCollector(source_platform="growthepie", records=records)
+
+    first = await run_collection_job("core_growthepie", collector, session_factory)
+    second = await run_collection_job("core_growthepie", collector, session_factory)
+
+    assert first.records_collected == 2
+    assert second.records_collected == 0
+    assert second.alerts_created == 0
+
+    async with session_factory() as session:
+        snapshots = (
+            await session.execute(
+                select(MetricSnapshot)
+                .where(MetricSnapshot.metric_name == "daily_active_users")
+                .order_by(MetricSnapshot.collected_day.asc())
+            )
+        ).scalars().all()
+
+    assert len(snapshots) == 2
 
 
 @pytest.mark.asyncio

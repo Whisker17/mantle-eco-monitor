@@ -1,14 +1,21 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 import json
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import AlertEvent, DeliveryEvent, MetricSnapshot, SourceRun, WatchlistProtocol
+from src.db.models import (
+    AlertEvent,
+    DeliveryEvent,
+    MetricSnapshot,
+    MetricSyncState,
+    SourceRun,
+    WatchlistProtocol,
+)
 from src.ingestion.base import MetricRecord
 
 
@@ -45,37 +52,140 @@ async def insert_snapshots(
     records: list[MetricRecord],
     formatted_values: dict[str, str] | None = None,
 ) -> list[MetricSnapshot]:
+    return await upsert_snapshots(session, records, formatted_values)
+
+
+async def upsert_snapshots(
+    session: AsyncSession,
+    records: list[MetricRecord],
+    formatted_values: dict[str, str] | None = None,
+) -> list[MetricSnapshot]:
     inserted: list[MetricSnapshot] = []
     formatted_values = formatted_values or {}
 
     for rec in records:
+        collected_day = rec.collected_at.date()
         existing = await session.execute(
             select(MetricSnapshot).where(
+                MetricSnapshot.scope == rec.scope,
                 MetricSnapshot.entity == rec.entity,
                 MetricSnapshot.metric_name == rec.metric_name,
-                func.date(MetricSnapshot.collected_at) == rec.collected_at.date(),
+                MetricSnapshot.collected_day == collected_day,
             )
         )
-        if existing.scalar_one_or_none() is not None:
-            continue
+        snapshot = existing.scalar_one_or_none()
+        if snapshot is None:
+            snapshot = MetricSnapshot(
+                scope=rec.scope,
+                entity=rec.entity,
+                metric_name=rec.metric_name,
+                value=rec.value,
+                formatted_value=formatted_values.get(rec.metric_name),
+                unit=rec.unit,
+                source_platform=rec.source_platform,
+                source_ref=rec.source_ref,
+                collected_at=rec.collected_at,
+                collected_day=collected_day,
+                created_at=datetime.now(tz=timezone.utc),
+            )
+            session.add(snapshot)
+            inserted.append(snapshot)
+        else:
+            formatted_value = formatted_values.get(rec.metric_name)
+            if (
+                snapshot.value == rec.value
+                and snapshot.formatted_value == formatted_value
+                and snapshot.unit == rec.unit
+                and snapshot.source_platform == rec.source_platform
+                and snapshot.source_ref == rec.source_ref
+                and snapshot.collected_at == rec.collected_at
+                and snapshot.collected_day == collected_day
+            ):
+                continue
 
-        snapshot = MetricSnapshot(
-            scope=rec.scope,
-            entity=rec.entity,
-            metric_name=rec.metric_name,
-            value=rec.value,
-            formatted_value=formatted_values.get(rec.metric_name),
-            unit=rec.unit,
-            source_platform=rec.source_platform,
-            source_ref=rec.source_ref,
-            collected_at=rec.collected_at,
-            created_at=datetime.now(tz=timezone.utc),
-        )
-        session.add(snapshot)
-        inserted.append(snapshot)
+            snapshot.value = rec.value
+            snapshot.formatted_value = formatted_value
+            snapshot.unit = rec.unit
+            snapshot.source_platform = rec.source_platform
+            snapshot.source_ref = rec.source_ref
+            snapshot.collected_at = rec.collected_at
+            snapshot.collected_day = collected_day
+            inserted.append(snapshot)
 
     await session.flush()
     return inserted
+
+
+async def get_metric_sync_state(
+    session: AsyncSession,
+    *,
+    source_platform: str,
+    scope: str,
+    entity: str,
+    metric_name: str,
+) -> MetricSyncState | None:
+    result = await session.execute(
+        select(MetricSyncState).where(
+            MetricSyncState.source_platform == source_platform,
+            MetricSyncState.scope == scope,
+            MetricSyncState.entity == entity,
+            MetricSyncState.metric_name == metric_name,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def upsert_metric_sync_state(
+    session: AsyncSession,
+    *,
+    source_platform: str,
+    scope: str,
+    entity: str,
+    metric_name: str,
+    last_synced_date: date | None = None,
+    last_backfilled_date: date | None = None,
+    backfill_status: str | None = None,
+    last_sync_status: str | None = None,
+    last_error: str | None = None,
+) -> MetricSyncState:
+    state = await get_metric_sync_state(
+        session,
+        source_platform=source_platform,
+        scope=scope,
+        entity=entity,
+        metric_name=metric_name,
+    )
+    now = datetime.now(tz=timezone.utc)
+
+    if state is None:
+        state = MetricSyncState(
+            source_platform=source_platform,
+            scope=scope,
+            entity=entity,
+            metric_name=metric_name,
+            last_synced_date=last_synced_date,
+            last_backfilled_date=last_backfilled_date,
+            backfill_status=backfill_status or "pending",
+            last_sync_status=last_sync_status or "pending",
+            last_error=last_error,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(state)
+    else:
+        if last_synced_date is not None:
+            state.last_synced_date = last_synced_date
+        if last_backfilled_date is not None:
+            state.last_backfilled_date = last_backfilled_date
+        if backfill_status is not None:
+            state.backfill_status = backfill_status
+        if last_sync_status is not None:
+            state.last_sync_status = last_sync_status
+        state.last_error = last_error
+        state.updated_at = now
+
+    await session.flush()
+    return state
 
 
 async def insert_alert(session: AsyncSession, **kwargs) -> AlertEvent:

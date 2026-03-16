@@ -1,8 +1,16 @@
-from src.db.models import AlertEvent, DeliveryEvent, MetricSnapshot, SourceRun, WatchlistProtocol
+from src.db.models import (
+    AlertEvent,
+    DeliveryEvent,
+    MetricSnapshot,
+    MetricSyncState,
+    SourceRun,
+    WatchlistProtocol,
+)
 
 
 def test_expected_tables_exist():
     assert MetricSnapshot.__tablename__ == "metric_snapshots"
+    assert MetricSyncState.__tablename__ == "metric_sync_states"
     assert AlertEvent.__tablename__ == "alert_events"
     assert DeliveryEvent.__tablename__ == "delivery_events"
     assert WatchlistProtocol.__tablename__ == "watchlist_protocols"
@@ -14,7 +22,25 @@ def test_metric_snapshot_has_required_columns():
     assert cols >= {
         "id", "scope", "entity", "metric_name", "value",
         "formatted_value", "unit", "source_platform", "source_ref",
-        "collected_at", "created_at",
+        "collected_at", "collected_day", "created_at",
+    }
+
+
+def test_metric_sync_state_has_required_columns():
+    cols = {c.name for c in MetricSyncState.__table__.columns}
+    assert cols >= {
+        "id",
+        "source_platform",
+        "scope",
+        "entity",
+        "metric_name",
+        "last_synced_date",
+        "last_backfilled_date",
+        "backfill_status",
+        "last_sync_status",
+        "last_error",
+        "created_at",
+        "updated_at",
     }
 
 
