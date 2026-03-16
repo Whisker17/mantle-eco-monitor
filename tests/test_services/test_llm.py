@@ -138,3 +138,108 @@ async def test_llm_client_includes_response_format_when_requested():
         ],
         "response_format": {"type": "json_object"},
     }
+
+
+@pytest.mark.asyncio
+async def test_llm_client_complete_with_tools_posts_tools_and_returns_first_tool_call():
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "metric_latest",
+                                        "arguments": '{"entity":"mantle","metric_name":"tvl"}',
+                                    },
+                                },
+                                {
+                                    "id": "call_2",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "watchlist",
+                                        "arguments": "{}",
+                                    },
+                                },
+                            ]
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = LLMClient(
+        api_base="https://llm.example.com/v1",
+        api_key="secret-key",
+        model="gpt-x",
+        app_name="mantle-eco-monitor",
+        app_url="https://github.com/Whisker17/mantle-eco-monitor",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    result = await client.complete_with_tools(
+        [{"role": "user", "content": "what is mantle tvl"}],
+        tools=[{"type": "function", "function": {"name": "metric_latest", "parameters": {"type": "object"}}}],
+        tool_choice="auto",
+    )
+
+    assert result.tool_name == "metric_latest"
+    assert result.arguments == {"entity": "mantle", "metric_name": "tvl"}
+    assert result.raw_tool_call["id"] == "call_1"
+    assert captured["body"] == {
+        "model": "gpt-x",
+        "messages": [{"role": "user", "content": "what is mantle tvl"}],
+        "tools": [{"type": "function", "function": {"name": "metric_latest", "parameters": {"type": "object"}}}],
+        "tool_choice": "auto",
+    }
+
+
+@pytest.mark.asyncio
+async def test_llm_client_complete_with_tools_returns_none_for_invalid_arguments_json():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call_bad",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "metric_latest",
+                                        "arguments": '{"entity":"mantle"',
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = LLMClient(
+        api_base="https://llm.example.com/v1",
+        api_key="secret-key",
+        model="gpt-x",
+        app_name="mantle-eco-monitor",
+        app_url="https://github.com/Whisker17/mantle-eco-monitor",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    result = await client.complete_with_tools(
+        [{"role": "user", "content": "what is mantle tvl"}],
+        tools=[{"type": "function", "function": {"name": "metric_latest", "parameters": {"type": "object"}}}],
+        tool_choice="auto",
+    )
+
+    assert result is None

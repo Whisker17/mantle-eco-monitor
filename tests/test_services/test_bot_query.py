@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -10,6 +11,7 @@ from src.db.models import AlertEvent, Base, MetricSnapshot, SourceRun, Watchlist
 from src.services.bot_catalog import build_bot_catalog
 from src.services import bot_query as bot_query_module
 from src.services.bot_query import BotQueryService
+from src.services.llm import ToolCallResult
 
 
 class FakeLLMClient:
@@ -23,6 +25,30 @@ class FakeLLMClient:
         self.calls.append({"messages": messages, "kwargs": kwargs})
         return self._responses.pop(0)
 
+    async def complete_with_tools(self, messages: list[dict], **kwargs) -> ToolCallResult | None:
+        self.messages.append(messages)
+        self.calls.append({"messages": messages, "kwargs": kwargs})
+        response = self._responses.pop(0)
+        try:
+            payload = json.loads(response)
+        except json.JSONDecodeError:
+            return None
+        intent = payload.pop("intent", None)
+        if not isinstance(intent, str):
+            return None
+        allowed_tool_names = {
+            tool["function"]["name"]
+            for tool in kwargs.get("tools", [])
+            if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
+        }
+        if intent not in allowed_tool_names:
+            return None
+        return ToolCallResult(
+            tool_name=intent,
+            arguments=payload,
+            raw_tool_call={"id": f"fake_{intent}", "function": {"name": intent, "arguments": payload}},
+        )
+
 
 class RejectIntentParseLLMClient:
     def __init__(self, answer: str):
@@ -33,9 +59,28 @@ class RejectIntentParseLLMClient:
     async def complete(self, messages: list[dict], **kwargs) -> str:
         self.messages.append(messages)
         self.calls.append({"messages": messages, "kwargs": kwargs})
-        if "Map the user message to JSON" in messages[0]["content"]:
-            raise AssertionError("deterministic parser should have handled this request")
         return self.answer
+
+    async def complete_with_tools(self, messages: list[dict], **kwargs) -> ToolCallResult | None:
+        self.messages.append(messages)
+        self.calls.append({"messages": messages, "kwargs": kwargs})
+        raise AssertionError("deterministic parser should have handled this request")
+
+
+class ToolCallingLLMClient:
+    def __init__(self, *, tool_result: ToolCallResult | None, answer: str):
+        self.tool_result = tool_result
+        self.answer = answer
+        self.complete_calls: list[dict] = []
+        self.tool_calls: list[dict] = []
+
+    async def complete(self, messages: list[dict], **kwargs) -> str:
+        self.complete_calls.append({"messages": messages, "kwargs": kwargs})
+        return self.answer
+
+    async def complete_with_tools(self, messages: list[dict], **kwargs) -> ToolCallResult | None:
+        self.tool_calls.append({"messages": messages, "kwargs": kwargs})
+        return self.tool_result
 
 
 class ForbiddenSessionFactory:
@@ -50,6 +95,147 @@ def test_metric_catalog_exposes_latest_and_history_capabilities():
     assert "metric_history" in catalog.intents
     assert catalog.metric_aliases["TVL"] == "tvl"
     assert catalog.metric_aliases["dex volume"] == "dex_volume"
+
+
+def test_bot_catalog_exposes_tool_definitions_for_all_supported_readonly_intents():
+    catalog = build_bot_catalog()
+
+    tool_names = [tool["function"]["name"] for tool in catalog.tools]
+
+    assert tool_names == [
+        "metric_latest",
+        "metric_history",
+        "recent_alerts",
+        "alerts_list",
+        "health_status",
+        "source_health",
+        "watchlist",
+        "daily_summary",
+    ]
+
+    metric_latest = catalog.tools[0]["function"]
+    assert metric_latest["parameters"]["properties"]["entity"]["enum"] == ["mantle"]
+    assert "tvl" in metric_latest["parameters"]["properties"]["metric_name"]["enum"]
+    assert "dex_volume" in metric_latest["parameters"]["properties"]["metric_name"]["enum"]
+
+    metric_history = catalog.tools[1]["function"]
+    assert metric_history["parameters"]["properties"]["days"]["minimum"] == 1
+    assert metric_history["parameters"]["properties"]["days"]["maximum"] == 90
+
+    health_status = next(tool for tool in catalog.tools if tool["function"]["name"] == "health_status")
+    assert health_status["function"]["parameters"]["properties"] == {}
+
+    daily_summary = next(tool for tool in catalog.tools if tool["function"]["name"] == "daily_summary")
+    assert "day" in daily_summary["function"]["parameters"]["properties"]
+    assert "days_ago" in daily_summary["function"]["parameters"]["properties"]
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_routes_metric_latest_via_tool_call(session_factory, seeded_data):
+    llm_client = ToolCallingLLMClient(
+        tool_result=ToolCallResult(
+            tool_name="metric_latest",
+            arguments={"entity": "mantle", "metric_name": "tvl"},
+            raw_tool_call={"id": "call_metric_latest"},
+        ),
+        answer="Mantle TVL is $1.5K.",
+    )
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("please tell me mantle tvl", now=seeded_data)
+
+    assert result["intent"] == "metric_latest"
+    assert result["data"]["metric_name"] == "tvl"
+    assert result["answer"] == "Mantle TVL is $1.5K."
+    assert len(llm_client.tool_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_routes_metric_history_via_tool_call(session_factory, seeded_data):
+    llm_client = ToolCallingLLMClient(
+        tool_result=ToolCallResult(
+            tool_name="metric_history",
+            arguments={"entity": "mantle", "metric_name": "tvl", "days": 7},
+            raw_tool_call={"id": "call_metric_history"},
+        ),
+        answer="Mantle TVL rose over the last 7 days.",
+    )
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("please show mantle tvl over 7 days", now=seeded_data)
+
+    assert result["intent"] == "metric_history"
+    assert result["data"]["metric_name"] == "tvl"
+    assert result["answer"] == "Mantle TVL rose over the last 7 days."
+    assert len(llm_client.tool_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_routes_recent_alerts_via_tool_call(session_factory, seeded_data):
+    llm_client = ToolCallingLLMClient(
+        tool_result=ToolCallResult(
+            tool_name="recent_alerts",
+            arguments={"entity": "mantle", "limit": 5},
+            raw_tool_call={"id": "call_recent_alerts"},
+        ),
+        answer="The latest alert is a high-severity TVL move.",
+    )
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("please show recent mantle alerts", now=seeded_data)
+
+    assert result["intent"] == "recent_alerts"
+    assert result["data"]["alerts"][0]["severity"] == "high"
+    assert result["answer"] == "The latest alert is a high-severity TVL move."
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_routes_health_status_via_tool_call(session_factory, seeded_data):
+    llm_client = ToolCallingLLMClient(
+        tool_result=ToolCallResult(
+            tool_name="health_status",
+            arguments={},
+            raw_tool_call={"id": "call_health_status"},
+        ),
+        answer="System health is degraded because one source is failing.",
+    )
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("please summarize system health", now=seeded_data)
+
+    assert result["intent"] == "health_status"
+    assert result["data"]["status"] == "degraded"
+    assert result["answer"] == "System health is degraded because one source is failing."
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_routes_watchlist_via_tool_call(session_factory, seeded_data):
+    llm_client = ToolCallingLLMClient(
+        tool_result=ToolCallResult(
+            tool_name="watchlist",
+            arguments={},
+            raw_tool_call={"id": "call_watchlist"},
+        ),
+        answer="The watchlist includes Aave V3 and Merchant Moe.",
+    )
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("please show the watchlist", now=seeded_data)
+
+    assert result["intent"] == "watchlist"
+    assert result["data"]["protocols"][0]["slug"] == "aave-v3"
+    assert result["answer"] == "The watchlist includes Aave V3 and Merchant Moe."
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_returns_unsupported_when_tool_call_missing(session_factory, seeded_data):
+    llm_client = ToolCallingLLMClient(tool_result=None, answer="unused")
+    service = BotQueryService(session_factory=ForbiddenSessionFactory(), llm_client=llm_client)
+
+    result = await service.handle_message("tell me a joke", now=seeded_data)
+
+    assert result["intent"] == "unsupported"
+    assert "read-only mantle monitoring queries" in result["answer"].lower()
 
 
 @pytest.mark.asyncio
@@ -160,7 +346,7 @@ async def test_bot_query_service_normalizes_llm_metric_alias_before_dispatch(ses
 
 
 @pytest.mark.asyncio
-async def test_bot_query_service_parser_prompt_includes_metric_catalog_constraints(
+async def test_bot_query_service_tool_call_request_includes_catalog_constraints(
     session_factory,
     seeded_data,
 ):
@@ -174,19 +360,21 @@ async def test_bot_query_service_parser_prompt_includes_metric_catalog_constrain
 
     await service.handle_message("please tell me mantle tvl", now=seeded_data)
 
-    parser_prompt = llm_client.messages[0]
-    assert "metric_latest" in parser_prompt[0]["content"]
-    assert "metric_history" in parser_prompt[0]["content"]
-    assert "tvl" in parser_prompt[0]["content"]
-    assert "dex_volume" in parser_prompt[0]["content"]
-    assert "mantle" in parser_prompt[0]["content"]
-    assert "bare metric request defaults to metric_latest" in parser_prompt[0]["content"]
-    assert len(parser_prompt) > 2
-    assert parser_prompt[1]["role"] == "user"
-    assert parser_prompt[2]["role"] == "assistant"
-    assert "query mantle tvl" in parser_prompt[1]["content"].lower()
-    assert '"intent":"metric_latest"' in parser_prompt[2]["content"]
-    assert llm_client.calls[0]["kwargs"]["response_format"] == {"type": "json_object"}
+    parser_request = llm_client.calls[0]
+    parser_messages = parser_request["messages"]
+    parser_tools = parser_request["kwargs"]["tools"]
+
+    assert "internal read-only mantle monitoring tool" in parser_messages[0]["content"].lower()
+    assert parser_messages[1]["role"] == "user"
+    assert parser_messages[1]["content"] == "please tell me mantle tvl"
+    assert parser_request["kwargs"]["tool_choice"] == "auto"
+    tool_names = [tool["function"]["name"] for tool in parser_tools]
+    assert "metric_latest" in tool_names
+    assert "metric_history" in tool_names
+    metric_latest = next(tool for tool in parser_tools if tool["function"]["name"] == "metric_latest")
+    assert "tvl" in metric_latest["function"]["parameters"]["properties"]["metric_name"]["enum"]
+    assert "dex_volume" in metric_latest["function"]["parameters"]["properties"]["metric_name"]["enum"]
+    assert metric_latest["function"]["parameters"]["properties"]["entity"]["enum"] == ["mantle"]
 
 
 @pytest.mark.asyncio
@@ -224,7 +412,7 @@ async def test_bot_query_service_logs_llm_parser_and_normalized_payload(session_
 
     await service.handle_message("please tell me mantle tvl", now=seeded_data)
 
-    assert any("path=llm" in message for message in captured)
+    assert any("path=tool_call" in message for message in captured)
     assert any("Mantle" in message for message in captured)
     assert any("tvl" in message for message in captured)
 

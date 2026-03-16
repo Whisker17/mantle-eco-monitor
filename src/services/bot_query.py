@@ -107,18 +107,19 @@ class BotQueryService:
             logger.debug("Bot query parser path=deterministic payload=%s", deterministic_payload)
             return deterministic_payload
 
-        parser_messages = self._build_intent_parser_messages(text)
-        logger.debug("Bot query parser path=llm question=%s", text)
-        response = await self._llm_client.complete(
+        parser_messages = self._build_tool_call_messages(text)
+        logger.debug("Bot query parser path=tool_call question=%s", text)
+        tool_result = await self._llm_client.complete_with_tools(
             parser_messages,
-            response_format={"type": "json_object"},
+            tools=self._catalog.tools,
+            tool_choice="auto",
         )
-        logger.debug("Bot query parser llm_response=%s", response)
-        try:
-            payload = json.loads(response)
-        except json.JSONDecodeError:
+        if tool_result is None:
+            logger.debug("Bot query parser path=tool_call result=none")
             return {"intent": "unsupported"}
 
+        logger.debug("Bot query parser raw_tool_call=%s", tool_result.raw_tool_call)
+        payload = {"intent": tool_result.tool_name, **tool_result.arguments}
         validated = self._validate_intent(payload)
         logger.debug("Bot query parser validated_payload=%s", validated)
         return validated
@@ -187,51 +188,15 @@ class BotQueryService:
             return aliases[value]
         return aliases.get(value.lower())
 
-    def _build_intent_parser_prompt(self) -> str:
-        canonical_entities = sorted(set(self._catalog.entity_aliases.values()))
-        canonical_metrics = sorted(set(self._catalog.metric_aliases.values()))
-        return (
-            "Map the user message to JSON with intent one of: "
-            "metric_latest, metric_history, recent_alerts, alerts_list, "
-            "health_status, source_health, watchlist, daily_summary, unsupported. "
-            "Requests to refresh, review, mutate state, trigger jobs, search the web, "
-            "or perform external actions must map to unsupported. "
-            f"For phase-1 metric routing, canonical entities are: {', '.join(canonical_entities)}. "
-            f"Canonical metric ids are: {', '.join(canonical_metrics)}. "
-            "Alias examples: TVL -> tvl, dex volume -> dex_volume. "
-            "A bare metric request defaults to metric_latest. "
-            "If a message asks for a metric plus a day window like 7d or 30d, use metric_history."
-        )
-
-    def _build_intent_parser_messages(self, text: str) -> list[dict[str, str]]:
+    def _build_tool_call_messages(self, text: str) -> list[dict[str, str]]:
         return [
             {
                 "role": "system",
-                "content": self._build_intent_parser_prompt(),
-            },
-            {
-                "role": "user",
-                "content": "query mantle tvl",
-            },
-            {
-                "role": "assistant",
-                "content": '{"intent":"metric_latest","entity":"mantle","metric_name":"tvl"}',
-            },
-            {
-                "role": "user",
-                "content": "show mantle tvl 7d",
-            },
-            {
-                "role": "assistant",
-                "content": '{"intent":"metric_history","entity":"mantle","metric_name":"tvl","days":7}',
-            },
-            {
-                "role": "user",
-                "content": "what is mantle dex volume",
-            },
-            {
-                "role": "assistant",
-                "content": '{"intent":"metric_latest","entity":"mantle","metric_name":"dex_volume"}',
+                "content": (
+                    "Choose the best internal read-only Mantle monitoring tool for the user request. "
+                    "Only use a tool when the request matches one of the supported read-only queries. "
+                    "If the request is unrelated, unsupported, or asks for mutation or external actions, do not call a tool."
+                ),
             },
             {
                 "role": "user",
