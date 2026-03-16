@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from src.integrations.lark.cards import build_bot_reply_card
+from src.services.bot_catalog import build_bot_catalog
 from src.services.query_tools import (
     get_alerts_list,
     get_daily_summary_context,
@@ -37,6 +39,7 @@ class BotQueryService:
         self._session_factory = session_factory
         self._llm_client = llm_client
         self._external_actions_enabled = external_actions_enabled
+        self._catalog = build_bot_catalog()
         self._intent_handlers = {
             "metric_latest": self._handle_metric_latest,
             "metric_history": self._handle_metric_history,
@@ -96,6 +99,10 @@ class BotQueryService:
         }
 
     async def _parse_intent(self, text: str) -> dict[str, Any]:
+        deterministic_payload = self._parse_metric_intent_deterministically(text)
+        if deterministic_payload is not None:
+            return deterministic_payload
+
         response = await self._llm_client.complete(
             [
                 {
@@ -120,6 +127,64 @@ class BotQueryService:
             return {"intent": "unsupported"}
 
         return self._validate_intent(payload)
+
+    def _parse_metric_intent_deterministically(self, text: str) -> dict[str, Any] | None:
+        normalized = self._normalize_query_text(text)
+        if not normalized:
+            return None
+
+        tokens = normalized.split()
+        if not tokens:
+            return None
+
+        if tokens[0] in {"query", "show", "get"}:
+            tokens = tokens[1:]
+        if len(tokens) < 2:
+            return None
+
+        days = None
+        if re.fullmatch(r"\d+d", tokens[-1]):
+            days = int(tokens[-1][:-1])
+            tokens = tokens[:-1]
+        elif tokens[-1] == "latest":
+            tokens = tokens[:-1]
+
+        if len(tokens) < 2:
+            return None
+
+        entity = self._lookup_alias(tokens[0], self._catalog.entity_aliases)
+        if entity is None:
+            return None
+
+        metric_name = self._lookup_alias(" ".join(tokens[1:]), self._catalog.metric_aliases)
+        if metric_name is None:
+            return None
+
+        if days is not None:
+            return {
+                "intent": "metric_history",
+                "entity": entity,
+                "metric_name": metric_name,
+                "days": days,
+            }
+        return {
+            "intent": "metric_latest",
+            "entity": entity,
+            "metric_name": metric_name,
+        }
+
+    def _normalize_query_text(self, text: str) -> str:
+        cleaned = text.strip()
+        cleaned = re.sub(r"^@bot\s+", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.replace("_", " ")
+        cleaned = re.sub(r"[^\w\s]", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        return cleaned.lower().strip()
+
+    def _lookup_alias(self, value: str, aliases: dict[str, str]) -> str | None:
+        if value in aliases:
+            return aliases[value]
+        return aliases.get(value.lower())
 
     def _validate_intent(self, payload: dict[str, Any]) -> dict[str, Any]:
         intent = payload.get("intent")

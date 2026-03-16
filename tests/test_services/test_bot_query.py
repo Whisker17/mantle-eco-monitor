@@ -21,6 +21,18 @@ class FakeLLMClient:
         return self._responses.pop(0)
 
 
+class RejectIntentParseLLMClient:
+    def __init__(self, answer: str):
+        self.answer = answer
+        self.messages: list[list[dict]] = []
+
+    async def complete(self, messages: list[dict]) -> str:
+        self.messages.append(messages)
+        if "Map the user message to JSON" in messages[0]["content"]:
+            raise AssertionError("deterministic parser should have handled this request")
+        return self.answer
+
+
 class ForbiddenSessionFactory:
     def __call__(self):
         raise AssertionError("session_factory should not be used")
@@ -33,6 +45,35 @@ def test_metric_catalog_exposes_latest_and_history_capabilities():
     assert "metric_history" in catalog.intents
     assert catalog.metric_aliases["TVL"] == "tvl"
     assert catalog.metric_aliases["dex volume"] == "dex_volume"
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_routes_query_mantle_tvl_without_llm_parser(session_factory, seeded_data):
+    llm_client = RejectIntentParseLLMClient("Mantle TVL is $1.5K.")
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("query mantle tvl", now=seeded_data)
+
+    assert result["intent"] == "metric_latest"
+    assert result["data"]["metric_name"] == "tvl"
+    assert result["answer"] == "Mantle TVL is $1.5K."
+    assert len(llm_client.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_routes_show_mantle_tvl_7d_to_metric_history_without_llm_parser(
+    session_factory,
+    seeded_data,
+):
+    llm_client = RejectIntentParseLLMClient("Mantle TVL rose over the last 7 days.")
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("show mantle tvl 7d", now=seeded_data)
+
+    assert result["intent"] == "metric_history"
+    assert result["data"]["metric_name"] == "tvl"
+    assert result["answer"] == "Mantle TVL rose over the last 7 days."
+    assert len(llm_client.messages) == 1
 
 
 @pytest.fixture()
@@ -181,12 +222,7 @@ async def seeded_data(session_factory):
 
 @pytest.mark.asyncio
 async def test_bot_query_service_handles_latest_metric_question(session_factory, seeded_data):
-    llm_client = FakeLLMClient(
-        [
-            '{"intent":"metric_latest","entity":"mantle","metric_name":"tvl"}',
-            "Mantle TVL is $1.5K.",
-        ]
-    )
+    llm_client = RejectIntentParseLLMClient("Mantle TVL is $1.5K.")
     service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
 
     result = await service.handle_message("@bot mantle tvl latest", now=seeded_data)
@@ -200,12 +236,7 @@ async def test_bot_query_service_handles_latest_metric_question(session_factory,
 
 @pytest.mark.asyncio
 async def test_bot_query_service_handles_metric_history_question(session_factory, seeded_data):
-    llm_client = FakeLLMClient(
-        [
-            '{"intent":"metric_history","entity":"mantle","metric_name":"tvl","days":7}',
-            "Mantle TVL rose over the last 7 days.",
-        ]
-    )
+    llm_client = RejectIntentParseLLMClient("Mantle TVL rose over the last 7 days.")
     service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
 
     result = await service.handle_message("@bot show mantle tvl 7d", now=seeded_data)
