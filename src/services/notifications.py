@@ -142,14 +142,20 @@ class NotificationService:
         environment = getattr(self._settings, "lark_environment", "dev")
         return f"{environment}:{channel}:{entity_type}:{entity_id}"
 
-    def _serialize_alert(self, alert: AlertEvent) -> dict[str, str | None]:
+    def _serialize_alert(self, alert: AlertEvent) -> dict[str, str | bool | None]:
         return {
             "entity": alert.entity,
             "metric_name": alert.metric_name,
             "current_value": _decimal_to_str(alert.current_value),
             "formatted_value": alert.formatted_value,
             "time_window": alert.time_window,
+            "change_pct": _decimal_to_str(alert.change_pct),
             "severity": alert.severity,
             "trigger_reason": alert.trigger_reason,
+            "source_platform": alert.source_platform,
             "source_ref": alert.source_ref,
+            "detected_at": alert.detected_at.isoformat() if alert.detected_at else None,
+            "is_ath": alert.is_ath,
+            "is_milestone": alert.is_milestone,
+            "milestone_label": alert.milestone_label,
         }

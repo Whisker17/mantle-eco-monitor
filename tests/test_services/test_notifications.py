@@ -143,3 +143,35 @@ async def test_notification_service_marks_failed_delivery_when_lark_send_raises(
     assert deliveries[0].status == "failed"
     assert deliveries[0].attempt_count == 1
     assert deliveries[0].last_error == "boom"
+
+
+@pytest.mark.asyncio
+async def test_notification_service_serializes_alert_fields_needed_for_lark_card(
+    session_factory,
+    monkeypatch,
+):
+    import src.services.notifications as notifications_module
+
+    alert = await _insert_alert(session_factory)
+    client = FakeLarkClient()
+    captured: dict[str, object] = {}
+
+    def fake_build_alert_card(payload: dict):
+        captured.update(payload)
+        return {"header": {"title": {"tag": "plain_text", "content": "Alert"}}, "elements": []}
+
+    monkeypatch.setattr(notifications_module, "build_alert_card", fake_build_alert_card)
+    service = NotificationService(
+        settings=_make_settings(),
+        session_factory=session_factory,
+        lark_client=client,
+    )
+
+    await service.deliver_alerts([alert])
+
+    assert captured["change_pct"] == "0.25"
+    assert captured["detected_at"] == "2026-03-15T10:00:00+00:00"
+    assert captured["is_ath"] is True
+    assert captured["is_milestone"] is False
+    assert captured["milestone_label"] is None
+    assert captured["source_platform"] == "defillama"

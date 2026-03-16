@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from src.integrations.lark.cards import (
     build_alert_card,
     build_bot_reply_card,
@@ -7,25 +9,97 @@ from src.integrations.lark.cards import (
 )
 
 
-def test_build_alert_card_includes_source_url():
+def _markdown_text_blocks(card: dict) -> list[str]:
+    return [element["content"] for element in card["elements"] if element["tag"] == "markdown"]
+
+
+def test_build_alert_card_formats_upward_alert_in_prd_layout():
     card = build_alert_card(
         {
             "entity": "mantle",
             "metric_name": "tvl",
             "formatted_value": "$1.5B",
             "time_window": "7d",
+            "change_pct": "0.25",
             "severity": "high",
-            "trigger_reason": "TVL up 25% in 7d",
+            "trigger_reason": "threshold_25pct_7d",
+            "source_platform": "defillama",
             "source_ref": "https://defillama.com/chain/Mantle",
+            "detected_at": datetime(2026, 3, 15, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
         }
     )
 
-    text_blocks = [element["content"] for element in card["elements"] if element["tag"] == "markdown"]
+    text_blocks = _markdown_text_blocks(card)
 
-    assert card["header"]["title"]["content"] == "Alert: mantle tvl"
+    assert card["header"]["title"]["content"] == "MANTLE METRICS ALERT"
+    assert card["header"]["template"] == "green"
     assert all("text" not in element for element in card["elements"] if element["tag"] == "markdown")
-    assert any("TVL up 25% in 7d" in block for block in text_blocks)
-    assert any("https://defillama.com/chain/Mantle" in block for block in text_blocks)
+    assert text_blocks == [
+        "**Metric:** TVL (Total Value Locked)",
+        "**Movement:** +25% (7D)",
+        "**Current Value:** $1.5B",
+        "**Status:** SIGNIFICANT UPWARD MOVE",
+        "**Source:** DefiLlama (https://defillama.com/chain/Mantle)",
+        "**Detected:** March 15, 2026 - 18:00 UTC+8",
+        "**Suggested Draft Copy:** Placeholder - draft copy not generated yet.",
+        "**Action Required:**\n- Social: Review alert context and refine for posting\n- Design: Prepare metric card or lightweight visual\n- Target post window: Within 6 hours of alert",
+    ]
+
+
+def test_build_alert_card_uses_red_header_for_declines():
+    card = build_alert_card(
+        {
+            "entity": "mantle",
+            "metric_name": "daily_active_users",
+            "formatted_value": "120K",
+            "time_window": "1d",
+            "change_pct": "-0.20",
+            "severity": "high",
+            "trigger_reason": "decline_20pct_1d",
+            "source_platform": "growthepie",
+            "source_ref": "https://api.growthepie.com",
+            "detected_at": datetime(2026, 3, 15, 3, 30, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        }
+    )
+
+    text_blocks = _markdown_text_blocks(card)
+
+    assert card["header"]["template"] == "red"
+    assert text_blocks[0] == "**Metric:** Daily Active Users"
+    assert text_blocks[1] == "**Movement:** -20% (1D)"
+    assert text_blocks[3] == "**Status:** SHARP DECLINE"
+
+
+def test_build_alert_card_formats_ath_status_with_neutral_header():
+    card = build_alert_card(
+        {
+            "entity": "mantle",
+            "metric_name": "tvl",
+            "formatted_value": "$755M+",
+            "time_window": "7d",
+            "change_pct": "0.66",
+            "severity": "critical",
+            "trigger_reason": "new_ath",
+            "source_platform": "defillama",
+            "source_ref": "https://defillama.com/chain/Mantle",
+            "detected_at": datetime(2026, 3, 4, 1, 42, tzinfo=UTC).isoformat(),
+            "is_ath": True,
+            "is_milestone": False,
+            "milestone_label": None,
+        }
+    )
+
+    text_blocks = _markdown_text_blocks(card)
+
+    assert card["header"]["template"] == "wathet"
+    assert text_blocks[1] == "**Movement:** +66% (7D)"
+    assert text_blocks[3] == "**Status:** NEW ALL-TIME HIGH"
 
 
 def test_build_daily_summary_card_includes_metrics_alerts_and_sources():
@@ -49,7 +123,7 @@ def test_build_daily_summary_card_includes_metrics_alerts_and_sources():
         }
     )
 
-    text_blocks = [element["content"] for element in card["elements"] if element["tag"] == "markdown"]
+    text_blocks = _markdown_text_blocks(card)
 
     assert card["header"]["title"]["content"] == "Mantle Daily Summary"
     assert all("text" not in element for element in card["elements"] if element["tag"] == "markdown")
@@ -67,7 +141,7 @@ def test_build_bot_reply_card_includes_answer_and_source_urls():
         ],
     )
 
-    text_blocks = [element["content"] for element in card["elements"] if element["tag"] == "markdown"]
+    text_blocks = _markdown_text_blocks(card)
 
     assert card["header"]["title"]["content"] == "Query Result"
     assert all("text" not in element for element in card["elements"] if element["tag"] == "markdown")
