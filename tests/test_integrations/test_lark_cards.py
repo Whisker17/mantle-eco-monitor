@@ -20,9 +20,10 @@ def test_build_alert_card_includes_source_url():
         }
     )
 
-    text_blocks = [element["text"]["content"] for element in card["elements"] if element["tag"] == "markdown"]
+    text_blocks = [element["content"] for element in card["elements"] if element["tag"] == "markdown"]
 
     assert card["header"]["title"]["content"] == "Alert: mantle tvl"
+    assert all("text" not in element for element in card["elements"] if element["tag"] == "markdown")
     assert any("TVL up 25% in 7d" in block for block in text_blocks)
     assert any("https://defillama.com/chain/Mantle" in block for block in text_blocks)
 
@@ -48,9 +49,10 @@ def test_build_daily_summary_card_includes_metrics_alerts_and_sources():
         }
     )
 
-    text_blocks = [element["text"]["content"] for element in card["elements"] if element["tag"] == "markdown"]
+    text_blocks = [element["content"] for element in card["elements"] if element["tag"] == "markdown"]
 
     assert card["header"]["title"]["content"] == "Mantle Daily Summary"
+    assert all("text" not in element for element in card["elements"] if element["tag"] == "markdown")
     assert any("TVL and DEX volume both moved higher." in block for block in text_blocks)
     assert any("tvl" in block and "$1.5B" in block for block in text_blocks)
     assert any("https://defillama.com/chain/Mantle" in block for block in text_blocks)
@@ -65,9 +67,10 @@ def test_build_bot_reply_card_includes_answer_and_source_urls():
         ],
     )
 
-    text_blocks = [element["text"]["content"] for element in card["elements"] if element["tag"] == "markdown"]
+    text_blocks = [element["content"] for element in card["elements"] if element["tag"] == "markdown"]
 
     assert card["header"]["title"]["content"] == "Query Result"
+    assert all("text" not in element for element in card["elements"] if element["tag"] == "markdown")
     assert any("Mantle TVL is $1.5B." in block for block in text_blocks)
     assert any("https://defillama.com/chain/Mantle" in block for block in text_blocks)
     assert any("https://example.com/secondary" in block for block in text_blocks)

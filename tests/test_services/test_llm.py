@@ -59,3 +59,39 @@ async def test_llm_client_posts_openai_compatible_chat_completion_request():
             {"role": "user", "content": "Say hi"},
         ],
     }
+
+
+@pytest.mark.asyncio
+async def test_llm_client_retries_on_server_error_and_returns_first_success():
+    calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] < 3:
+            return httpx.Response(500, json={"error": "temporary"})
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "recovered",
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = LLMClient(
+        api_base="https://llm.example.com/v1",
+        api_key="secret-key",
+        model="gpt-x",
+        app_name="mantle-eco-monitor",
+        app_url="https://github.com/Whisker17/mantle-eco-monitor",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    result = await client.complete([{"role": "user", "content": "retry please"}])
+
+    assert result == "recovered"
+    assert calls["count"] == 3

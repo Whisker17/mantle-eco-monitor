@@ -118,7 +118,7 @@ async def test_daily_summary_service_summarizes_previous_shanghai_day_and_sends_
     assert notification_service.calls[0]["summary_key"] == "2026-03-15"
 
     text_blocks = [
-        element["text"]["content"]
+        element["content"]
         for element in notification_service.calls[0]["card"]["elements"]
         if element["tag"] == "markdown"
     ]

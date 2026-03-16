@@ -4,10 +4,7 @@ from __future__ import annotations
 def _markdown_block(content: str) -> dict:
     return {
         "tag": "markdown",
-        "text": {
-            "tag": "lark_md",
-            "content": content,
-        },
+        "content": content,
     }
 
 
