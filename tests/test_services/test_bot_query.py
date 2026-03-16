@@ -76,6 +76,69 @@ async def test_bot_query_service_routes_show_mantle_tvl_7d_to_metric_history_wit
     assert len(llm_client.messages) == 1
 
 
+@pytest.mark.asyncio
+async def test_bot_query_service_normalizes_llm_metric_latest_payload_before_dispatch(
+    session_factory,
+    seeded_data,
+):
+    llm_client = FakeLLMClient(
+        [
+            '{"intent":"metric_latest","entity":"Mantle","metric_name":"TVL"}',
+            "Mantle TVL is $1.5K.",
+        ]
+    )
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("what is Mantle TVL", now=seeded_data)
+
+    assert result["intent"] == "metric_latest"
+    assert result["data"]["entity"] == "mantle"
+    assert result["data"]["metric_name"] == "tvl"
+    assert result["answer"] == "Mantle TVL is $1.5K."
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_normalizes_llm_metric_alias_before_dispatch(session_factory, seeded_data):
+    llm_client = FakeLLMClient(
+        [
+            '{"intent":"metric_latest","entity":"Mantle","metric_name":"DEX volume"}',
+            "Mantle DEX volume is $300.",
+        ]
+    )
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("what is Mantle DEX volume", now=seeded_data)
+
+    assert result["intent"] == "metric_latest"
+    assert result["data"]["entity"] == "mantle"
+    assert result["data"]["metric_name"] == "dex_volume"
+    assert result["answer"] == "Mantle DEX volume is $300."
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_parser_prompt_includes_metric_catalog_constraints(
+    session_factory,
+    seeded_data,
+):
+    llm_client = FakeLLMClient(
+        [
+            '{"intent":"metric_latest","entity":"mantle","metric_name":"tvl"}',
+            "Mantle TVL is $1.5K.",
+        ]
+    )
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    await service.handle_message("what is mantle tvl", now=seeded_data)
+
+    parser_prompt = llm_client.messages[0]
+    assert "metric_latest" in parser_prompt[0]["content"]
+    assert "metric_history" in parser_prompt[0]["content"]
+    assert "tvl" in parser_prompt[0]["content"]
+    assert "dex_volume" in parser_prompt[0]["content"]
+    assert "mantle" in parser_prompt[0]["content"]
+    assert "bare metric request defaults to metric_latest" in parser_prompt[0]["content"]
+
+
 @pytest.fixture()
 async def session_factory(tmp_path):
     db_path = tmp_path / "bot_query.db"
@@ -364,28 +427,17 @@ async def test_bot_query_service_returns_supported_query_fallback_for_unsupporte
     session_factory,
     seeded_data,
 ):
-    llm_client = FakeLLMClient(
-        [
-            '{"intent":"web_search","query":"mantle latest news"}',
-            "I can only answer from internal monitoring data right now. I support latest metrics, metric history, alerts, health status, source health, watchlist, and daily summaries.",
-        ]
-    )
+    llm_client = FakeLLMClient(['{"intent":"web_search","query":"mantle latest news"}'])
     service = BotQueryService(session_factory=ForbiddenSessionFactory(), llm_client=llm_client)
 
     result = await service.handle_message("@bot tell me a joke", now=seeded_data)
 
     assert result["intent"] == "unsupported"
-    assert result["answer"] == (
-        "I can only answer from internal monitoring data right now. "
-        "I support latest metrics, metric history, alerts, health status, source health, watchlist, and daily summaries."
-    )
+    assert "latest metrics" in result["answer"].lower()
+    assert "metric history" in result["answer"].lower()
+    assert "external actions" not in result["answer"].lower()
     assert result["source_urls"] == []
-    assert len(llm_client.messages) == 2
-
-    unsupported_prompt = llm_client.messages[1]
-    assert "do not claim" in unsupported_prompt[0]["content"].lower()
-    assert "external actions" in unsupported_prompt[0]["content"].lower()
-    assert '"external_actions_enabled": false' in unsupported_prompt[1]["content"].lower()
+    assert len(llm_client.messages) == 1
 
 
 @pytest.mark.asyncio
@@ -393,41 +445,28 @@ async def test_bot_query_service_returns_constrained_explanation_when_supported_
     session_factory,
     seeded_data,
 ):
-    llm_client = FakeLLMClient(
-        [
-            '{"intent":"metric_latest","entity":"unknown","metric_name":"tvl"}',
-            "I could not find internal monitoring data for that metric yet. I can still help with latest metrics, metric history, alerts, health status, source health, watchlist, and daily summaries that exist in the system.",
-        ]
-    )
+    llm_client = FakeLLMClient(['{"intent":"metric_latest","entity":"unknown","metric_name":"tvl"}'])
     service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
 
     result = await service.handle_message("@bot latest unknown tvl", now=seeded_data)
 
     assert result["intent"] == "metric_latest"
-    assert result["answer"] == (
-        "I could not find internal monitoring data for that metric yet. "
-        "I can still help with latest metrics, metric history, alerts, health status, source health, watchlist, and daily summaries that exist in the system."
-    )
+    assert "could not find internal monitoring data" in result["answer"].lower()
+    assert "external actions" not in result["answer"].lower()
     assert result["data"] == {}
     assert result["source_urls"] == []
-    assert len(llm_client.messages) == 2
+    assert len(llm_client.messages) == 1
 
 
 @pytest.mark.asyncio
 async def test_bot_query_service_keeps_mutation_style_requests_unsupported(session_factory, seeded_data):
-    llm_client = FakeLLMClient(
-        [
-            '{"intent":"watchlist_refresh"}',
-            "I cannot run refresh or other write actions from chat. I can only answer read-only monitoring queries.",
-        ]
-    )
+    llm_client = FakeLLMClient(['{"intent":"watchlist_refresh"}'])
     service = BotQueryService(session_factory=ForbiddenSessionFactory(), llm_client=llm_client)
 
     result = await service.handle_message("@bot refresh watchlist", now=seeded_data)
 
     assert result["intent"] == "unsupported"
-    assert result["answer"] == (
-        "I cannot run refresh or other write actions from chat. "
-        "I can only answer read-only monitoring queries."
-    )
+    assert "read-only mantle monitoring queries" in result["answer"].lower()
+    assert "external actions" not in result["answer"].lower()
     assert result["data"] == {}
+    assert len(llm_client.messages) == 1

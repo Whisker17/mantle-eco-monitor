@@ -107,13 +107,7 @@ class BotQueryService:
             [
                 {
                     "role": "system",
-                    "content": (
-                        "Map the user message to JSON with intent one of: "
-                        "metric_latest, metric_history, recent_alerts, alerts_list, "
-                        "health_status, source_health, watchlist, daily_summary, unsupported. "
-                        "Requests to refresh, review, mutate state, trigger jobs, search the web, "
-                        "or perform external actions must map to unsupported."
-                    ),
+                    "content": self._build_intent_parser_prompt(),
                 },
                 {
                     "role": "user",
@@ -186,26 +180,57 @@ class BotQueryService:
             return aliases[value]
         return aliases.get(value.lower())
 
+    def _build_intent_parser_prompt(self) -> str:
+        canonical_entities = sorted(set(self._catalog.entity_aliases.values()))
+        canonical_metrics = sorted(set(self._catalog.metric_aliases.values()))
+        return (
+            "Map the user message to JSON with intent one of: "
+            "metric_latest, metric_history, recent_alerts, alerts_list, "
+            "health_status, source_health, watchlist, daily_summary, unsupported. "
+            "Requests to refresh, review, mutate state, trigger jobs, search the web, "
+            "or perform external actions must map to unsupported. "
+            f"For phase-1 metric routing, canonical entities are: {', '.join(canonical_entities)}. "
+            f"Canonical metric ids are: {', '.join(canonical_metrics)}. "
+            "Alias examples: TVL -> tvl, dex volume -> dex_volume. "
+            "A bare metric request defaults to metric_latest. "
+            "If a message asks for a metric plus a day window like 7d or 30d, use metric_history."
+        )
+
+    def _normalize_metric_payload(self, payload: dict[str, Any]) -> dict[str, str] | None:
+        entity = payload.get("entity")
+        metric_name = payload.get("metric_name")
+        if not isinstance(entity, str) or not isinstance(metric_name, str):
+            return None
+
+        normalized_entity = re.sub(r"\s+", " ", entity.strip().lower())
+        normalized_metric_name = re.sub(r"\s+", "_", metric_name.strip().lower())
+        canonical_entity = self._lookup_alias(entity.strip(), self._catalog.entity_aliases) or normalized_entity
+        canonical_metric_name = (
+            self._lookup_alias(metric_name.strip(), self._catalog.metric_aliases) or normalized_metric_name
+        )
+
+        return {
+            "entity": canonical_entity,
+            "metric_name": canonical_metric_name,
+        }
+
     def _validate_intent(self, payload: dict[str, Any]) -> dict[str, Any]:
         intent = payload.get("intent")
         if intent == "metric_latest":
-            if isinstance(payload.get("entity"), str) and isinstance(payload.get("metric_name"), str):
+            normalized = self._normalize_metric_payload(payload)
+            if normalized is not None:
                 return {
                     "intent": intent,
-                    "entity": payload["entity"],
-                    "metric_name": payload["metric_name"],
+                    "entity": normalized["entity"],
+                    "metric_name": normalized["metric_name"],
                 }
         if intent == "metric_history":
-            if (
-                isinstance(payload.get("entity"), str)
-                and isinstance(payload.get("metric_name"), str)
-                and isinstance(payload.get("days"), int)
-                and payload["days"] > 0
-            ):
+            normalized = self._normalize_metric_payload(payload)
+            if normalized is not None and isinstance(payload.get("days"), int) and payload["days"] > 0:
                 return {
                     "intent": intent,
-                    "entity": payload["entity"],
-                    "metric_name": payload["metric_name"],
+                    "entity": normalized["entity"],
+                    "metric_name": normalized["metric_name"],
                     "days": payload["days"],
                 }
         if intent == "recent_alerts":
@@ -384,32 +409,16 @@ class BotQueryService:
         requested_intent: str | None,
         reason: str,
     ) -> dict[str, Any]:
-        answer = await self._llm_client.complete(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a Mantle monitoring bot. "
-                        "Do not claim you executed anything, searched the web, or used unsupported tools. "
-                        f"The currently supported capabilities are {SUPPORTED_CAPABILITIES_TEXT}. "
-                        "External actions are disabled unless explicitly enabled, and they are currently disabled."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {
-                            "question": text,
-                            "reason": reason,
-                            "requested_intent": requested_intent,
-                            "supported_intents": list(SUPPORTED_INTENTS),
-                            "external_actions_enabled": self._external_actions_enabled,
-                        },
-                        sort_keys=True,
-                    ),
-                },
-            ]
-        )
+        if reason == "no_internal_data":
+            answer = (
+                "I could not find internal monitoring data for that query yet. "
+                f"I can still help with {SUPPORTED_CAPABILITIES_TEXT} that exist in the system."
+            )
+        else:
+            answer = (
+                "I can only answer read-only Mantle monitoring queries. "
+                f"Supported queries include {SUPPORTED_CAPABILITIES_TEXT}."
+            )
         response_intent = "unsupported" if reason == "unsupported_intent" else requested_intent or "unsupported"
         return {
             "intent": response_intent,
