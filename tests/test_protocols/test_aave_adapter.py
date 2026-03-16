@@ -28,7 +28,7 @@ def test_aave_adapter_returns_supply_borrowed_utilization(sample_aave_payload):
 
     assert names["supply"].value == Decimal("245000000")
     assert names["borrowed"].value == Decimal("89000000")
-    assert names["tvl"].value == Decimal("156000000")  # 245M - 89M
+    assert names["tvl"].value == Decimal("245000000")
 
     utilization = names["utilization"].value
     expected = Decimal("89000000") / Decimal("245000000")
@@ -57,6 +57,27 @@ def test_aave_adapter_handles_missing_borrowed():
     names = {r.metric_name: r for r in records}
     assert names["borrowed"].value == Decimal("0")
     assert names["utilization"].value == Decimal("0")
+    assert names["tvl"].value == Decimal("100000000")
+
+
+def test_aave_adapter_keeps_tvl_non_negative_when_borrowed_exceeds_supply():
+    data = {
+        "tvl": [{"date": 1710374400, "totalLiquidityUSD": 487_233_030}],
+        "chainTvls": {
+            "Mantle": {
+                "tvl": [{"date": 1710374400, "totalLiquidityUSD": 487_233_030}],
+            },
+            "Mantle-borrowed": {
+                "tvl": [{"date": 1710374400, "totalLiquidityUSD": 520_163_019}],
+            },
+        },
+    }
+
+    adapter = AaveAdapter()
+    records = adapter._parse(data)
+
+    names = {r.metric_name: r for r in records}
+    assert names["tvl"].value == Decimal("487233030")
 
 
 def test_aave_adapter_slug_and_tier():

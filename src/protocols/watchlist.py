@@ -81,28 +81,4 @@ class WatchlistManager:
         ranked_protocols: list[dict],
         pinned_slugs: set[str] | None = None,
     ) -> list[dict]:
-        if pinned_slugs is None:
-            pinned_slugs = {s["slug"] for s in WATCHLIST_SEED if s.get("pinned")}
-
-        pinned_entries = [s for s in WATCHLIST_SEED if s["slug"] in pinned_slugs]
-        dynamic: list[dict] = []
-
-        for p in ranked_protocols:
-            slug = p.get("slug", "")
-            if slug in pinned_slugs:
-                continue
-            if len(dynamic) >= MAX_DYNAMIC_SLOTS:
-                break
-            category = p.get("_category", "other")
-            tier = "dex" if category == "dex" else "generic"
-            metrics = ["tvl", "volume"] if tier == "dex" else ["tvl"]
-            dynamic.append({
-                "slug": slug,
-                "display_name": p.get("name", slug),
-                "category": category,
-                "tier": tier,
-                "pinned": False,
-                "metrics": metrics,
-            })
-
-        return pinned_entries + dynamic
+        return self.get_seed()

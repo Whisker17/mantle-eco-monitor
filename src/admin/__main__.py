@@ -5,6 +5,7 @@ import json
 
 from src.admin.collect import collect_job
 from src.admin.inspect import inspect_alerts, inspect_overview, inspect_runs, inspect_snapshots
+from src.admin.rebuild import rebuild_data_quality_history
 from src.admin.runtime import run_handler
 from src.admin.runtime import build_admin_session_factory, load_settings
 from src.admin.seed import seed_alert_spike
@@ -52,6 +53,12 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="evaluate_rules",
     )
     alert_spike_parser.set_defaults(evaluate_rules=True)
+
+    rebuild_parser = subparsers.add_parser("rebuild")
+    rebuild_subparsers = rebuild_parser.add_subparsers(dest="rebuild_command", required=True)
+    data_quality_parser = rebuild_subparsers.add_parser("data-quality-history")
+    data_quality_parser.add_argument("--apply", action="store_true")
+    data_quality_parser.add_argument("--run-jobs", action="store_true")
 
     return parser
 
@@ -110,6 +117,17 @@ def main(argv: list[str] | None = None) -> int:
                 previous=command_args.previous,
                 current=command_args.current,
                 evaluate_rules=command_args.evaluate_rules,
+            )
+        elif command_args.command == "rebuild":
+            settings = load_settings()
+            session_factory = build_admin_session_factory(settings)
+            if command_args.rebuild_command != "data-quality-history":
+                raise SystemExit(f"Unknown rebuild command: {command_args.rebuild_command}")
+            result = await rebuild_data_quality_history(
+                session_factory,
+                settings=settings,
+                apply=command_args.apply,
+                run_jobs=command_args.run_jobs,
             )
         else:
             raise SystemExit(f"Unknown command: {command_args.command}")

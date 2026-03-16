@@ -1,28 +1,27 @@
 from src.protocols.watchlist import WatchlistManager, _score_protocol
 
 
-def test_watchlist_manager_preserves_pinned_aave_and_refreshes_dynamic_slots():
+def test_watchlist_manager_returns_fixed_curated_protocols():
     manager = WatchlistManager()
+    watchlist = manager.build_watchlist([])
 
-    sample_protocols = [
-        {"slug": "aave-v3", "name": "Aave V3", "category": "Lending", "tvl": 200_000_000, "chains": ["Mantle"]},
-        {"slug": "merchant-moe-dex", "name": "Merchant Moe", "category": "Dexes", "tvl": 50_000_000, "chains": ["Mantle"]},
-        {"slug": "ondo-finance", "name": "Ondo Finance", "category": "RWA", "tvl": 30_000_000, "chains": ["Mantle"]},
-        {"slug": "random-bridge", "name": "Random Bridge", "category": "Bridge", "tvl": 100_000_000, "chains": ["Mantle"]},
+    assert [entry["slug"] for entry in watchlist] == [
+        "aave-v3",
+        "cian-yield-layer",
+        "mantle-index-four-fund",
+        "merchant-moe",
+        "treehouse-protocol",
+        "ondo-yield-assets",
+        "agni-finance",
+        "stargate-finance",
+        "apex-omni",
+        "compound-v3",
+        "uniswap-v3",
+        "init-capital",
+        "woofi",
+        "fluxion-network",
     ]
-
-    ranked = manager.score_and_rank(sample_protocols)
-    watchlist = manager.build_watchlist(ranked)
-
-    slugs = [w["slug"] for w in watchlist]
-    assert "aave-v3" in slugs
-
-    aave_entry = next(w for w in watchlist if w["slug"] == "aave-v3")
-    assert aave_entry["pinned"] is True
-
-    non_pinned = [w for w in watchlist if not w["pinned"]]
-    assert len(non_pinned) > 0
-    assert all(w["pinned"] is False for w in non_pinned)
+    assert next(w for w in watchlist if w["slug"] == "aave-v3")["pinned"] is True
 
 
 def test_watchlist_excludes_cex():
@@ -52,16 +51,14 @@ def test_watchlist_seed_contains_aave():
     assert "aave-v3" in slugs
 
 
-def test_dynamic_slots_limited():
+def test_fixed_watchlist_ignores_ranked_protocols():
     manager = WatchlistManager()
 
-    protocols = [
-        {"slug": f"proto-{i}", "name": f"Proto {i}", "category": "Dexes", "tvl": 1_000_000 * (20 - i)}
-        for i in range(20)
-    ]
-
-    ranked = manager.score_and_rank(protocols)
+    ranked = manager.score_and_rank(
+        [
+            {"slug": "random-proto", "name": "Random Proto", "category": "Dexes", "tvl": 999_999_999},
+        ]
+    )
     watchlist = manager.build_watchlist(ranked)
 
-    non_pinned = [w for w in watchlist if not w["pinned"]]
-    assert len(non_pinned) <= 15
+    assert "random-proto" not in [w["slug"] for w in watchlist]

@@ -24,17 +24,20 @@ async def test_phase1_pipeline_writes_snapshot_and_alert(
     now = datetime.now(tz=timezone.utc)
 
     async with test_session_factory() as session:
-        old_record = MetricRecord(
-            scope="core",
-            entity="mantle",
-            metric_name="tvl",
-            value=Decimal("1_000_000_000"),
-            unit="usd",
-            source_platform="defillama",
-            source_ref=None,
-            collected_at=now - timedelta(days=8),
-        )
-        await insert_snapshots(session, [old_record])
+        old_records = [
+            MetricRecord(
+                scope="core",
+                entity="mantle",
+                metric_name="tvl",
+                value=Decimal("1_000_000_000"),
+                unit="usd",
+                source_platform="defillama",
+                source_ref=None,
+                collected_at=now - timedelta(days=7 - offset),
+            )
+            for offset in range(7)
+        ]
+        await insert_snapshots(session, old_records)
         await session.commit()
 
     async with test_session_factory() as session:

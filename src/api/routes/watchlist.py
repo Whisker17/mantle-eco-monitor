@@ -50,13 +50,7 @@ async def refresh_watchlist(
     from src.protocols.watchlist import WatchlistManager
 
     manager = WatchlistManager()
-    try:
-        protocols = await manager.fetch_mantle_protocols()
-        ranked = manager.score_and_rank(protocols)
-        entries = manager.build_watchlist(ranked)
-    except Exception:
-        logger.exception("Watchlist refresh failed, falling back to seed list")
-        entries = manager.get_seed()
+    entries = manager.get_seed()
 
     await upsert_watchlist(session, entries)
     await session.commit()

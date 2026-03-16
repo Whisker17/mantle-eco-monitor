@@ -214,6 +214,71 @@ async def test_get_comparison_snapshot_ath(async_session):
 
 
 @pytest.mark.asyncio
+async def test_get_comparison_snapshot_returns_none_for_sparse_7d_history(async_session):
+    now = datetime.now(tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    records = [
+        _make_record(value="100", collected_at=now - timedelta(days=1)),
+        _make_record(value="80", collected_at=now),
+    ]
+    await insert_snapshots(async_session, records)
+    await async_session.commit()
+
+    anchor = await get_comparison_snapshot(
+        async_session,
+        "mantle",
+        "tvl",
+        TimeWindow.D7,
+        anchor_at=now,
+    )
+
+    assert anchor is None
+
+
+@pytest.mark.asyncio
+async def test_get_comparison_snapshot_returns_none_for_sparse_mtd_history(async_session):
+    anchor_at = datetime.now(tz=timezone.utc).replace(day=16, hour=0, minute=0, second=0, microsecond=0)
+    records = [
+        _make_record(value="100", collected_at=anchor_at.replace(day=9)),
+        _make_record(value="80", collected_at=anchor_at),
+    ]
+    await insert_snapshots(async_session, records)
+    await async_session.commit()
+
+    anchor = await get_comparison_snapshot(
+        async_session,
+        "mantle",
+        "tvl",
+        TimeWindow.MTD,
+        anchor_at=anchor_at,
+    )
+
+    assert anchor is None
+
+
+@pytest.mark.asyncio
+async def test_get_comparison_snapshot_returns_anchor_when_7d_history_has_coverage(async_session):
+    anchor_at = datetime.now(tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    records = [
+        _make_record(value=str(100 + offset), collected_at=anchor_at - timedelta(days=7 - offset))
+        for offset in range(8)
+        if offset != 2
+    ]
+    await insert_snapshots(async_session, records)
+    await async_session.commit()
+
+    anchor = await get_comparison_snapshot(
+        async_session,
+        "mantle",
+        "tvl",
+        TimeWindow.D7,
+        anchor_at=anchor_at,
+    )
+
+    assert anchor is not None
+    assert anchor.collected_at.date() == (anchor_at - timedelta(days=7)).date()
+
+
+@pytest.mark.asyncio
 async def test_get_previous_snapshot(async_session):
     now = datetime.now(tz=timezone.utc)
     records = [

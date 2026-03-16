@@ -69,6 +69,15 @@ def test_admin_cli_parses_seed_alert_spike_command():
     assert args.evaluate_rules is True
 
 
+def test_admin_cli_parses_rebuild_data_quality_history_command():
+    parser = _build_parser()
+
+    args = parser.parse_args(["rebuild", "data-quality-history"])
+
+    assert args.command == "rebuild"
+    assert args.rebuild_command == "data-quality-history"
+
+
 @pytest.mark.asyncio
 async def test_admin_runtime_runs_async_handler():
     calls: list[argparse.Namespace] = []

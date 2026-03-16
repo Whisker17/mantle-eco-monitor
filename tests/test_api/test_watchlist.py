@@ -24,15 +24,17 @@ def test_refresh_watchlist(client):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "refreshed"
-    assert data["count"] > 0
+    assert data["count"] == 14
 
     response = client.get("/api/watchlist")
     protocols = response.json()["protocols"]
     slugs = [p["slug"] for p in protocols]
     assert "aave-v3" in slugs
+    assert "merchant-moe" in slugs
+    assert "stargate-finance" in slugs
 
 
-def test_refresh_watchlist_fetches_dynamic_protocols(client, monkeypatch):
+def test_refresh_watchlist_uses_fixed_seed_even_when_fetch_is_monkeypatched(client, monkeypatch):
     from src.protocols.watchlist import WatchlistManager
 
     async def fake_fetch(self):
@@ -47,9 +49,10 @@ def test_refresh_watchlist_fetches_dynamic_protocols(client, monkeypatch):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["count"] >= 3
+    assert data["count"] == 14
 
     response = client.get("/api/watchlist")
     slugs = [p["slug"] for p in response.json()["protocols"]]
-    assert "merchant-moe-dex" in slugs
+    assert "merchant-moe" in slugs
     assert "ondo-yield-assets" in slugs
+    assert "merchant-moe-dex" not in slugs

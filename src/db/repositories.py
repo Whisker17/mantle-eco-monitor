@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from enum import Enum
 import json
@@ -98,7 +98,6 @@ async def upsert_snapshots(
                 and snapshot.unit == rec.unit
                 and snapshot.source_platform == rec.source_platform
                 and snapshot.source_ref == rec.source_ref
-                and snapshot.collected_at == rec.collected_at
                 and snapshot.collected_day == collected_day
             ):
                 continue
@@ -290,8 +289,10 @@ async def get_comparison_snapshot(
     entity: str,
     metric_name: str,
     window: TimeWindow,
+    *,
+    anchor_at: datetime | None = None,
 ) -> MetricSnapshot | None:
-    now = datetime.now(tz=timezone.utc)
+    now = anchor_at or datetime.now(tz=timezone.utc)
 
     if window == TimeWindow.ATH:
         stmt = (
@@ -314,17 +315,23 @@ async def get_comparison_snapshot(
             .limit(1)
         )
     else:
-        cutoff = _window_cutoff(window, now)
+        anchor_day = now.date()
+        start_day = _window_start_day(window, anchor_day)
         stmt = (
             select(MetricSnapshot)
             .where(
                 MetricSnapshot.entity == entity,
                 MetricSnapshot.metric_name == metric_name,
-                MetricSnapshot.collected_at >= cutoff,
+                MetricSnapshot.collected_day >= start_day,
+                MetricSnapshot.collected_day <= anchor_day,
             )
-            .order_by(MetricSnapshot.collected_at.asc())
-            .limit(1)
+            .order_by(MetricSnapshot.collected_day.asc())
         )
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+        if not _window_has_coverage(window, rows, anchor_day):
+            return None
+        return rows[0]
 
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -350,8 +357,6 @@ async def get_previous_snapshot(
 
 
 def _window_cutoff(window: TimeWindow, now: datetime) -> datetime:
-    from datetime import timedelta
-
     match window:
         case TimeWindow.D7:
             return now - timedelta(days=7)
@@ -369,3 +374,52 @@ def _window_cutoff(window: TimeWindow, now: datetime) -> datetime:
             return now - timedelta(days=365)
         case _:
             return now - timedelta(days=7)
+
+
+def _window_start_day(window: TimeWindow, anchor_day: date) -> date:
+    match window:
+        case TimeWindow.D7:
+            return anchor_day - timedelta(days=7)
+        case TimeWindow.MTD:
+            return anchor_day.replace(day=1)
+        case TimeWindow.M1:
+            return anchor_day - timedelta(days=30)
+        case TimeWindow.M3:
+            return anchor_day - timedelta(days=90)
+        case TimeWindow.M6:
+            return anchor_day - timedelta(days=180)
+        case TimeWindow.YTD:
+            return anchor_day.replace(month=1, day=1)
+        case TimeWindow.Y1:
+            return anchor_day - timedelta(days=365)
+        case _:
+            return anchor_day - timedelta(days=7)
+
+
+def _window_has_coverage(
+    window: TimeWindow,
+    rows: list[MetricSnapshot],
+    anchor_day: date,
+) -> bool:
+    if not rows:
+        return False
+
+    available_days = {row.collected_day for row in rows}
+
+    if window == TimeWindow.D7:
+        start_day = anchor_day - timedelta(days=7)
+        if rows[0].collected_day > start_day:
+            return False
+        present_days = sum(
+            1 for offset in range(8) if start_day + timedelta(days=offset) in available_days
+        )
+        return present_days >= 6
+
+    if window == TimeWindow.MTD:
+        month_start = anchor_day.replace(day=1)
+        if rows[0].collected_day > month_start + timedelta(days=1):
+            return False
+        total_days = (anchor_day - month_start).days + 1
+        return len(available_days) * 100 >= total_days * 80
+
+    return True

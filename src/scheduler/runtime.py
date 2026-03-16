@@ -226,13 +226,7 @@ async def refresh_watchlist(
     session_factory: async_sessionmaker[AsyncSession],
     manager,
 ) -> int:
-    try:
-        protocols = await manager.fetch_mantle_protocols()
-        ranked = manager.score_and_rank(protocols)
-        entries = manager.build_watchlist(ranked)
-    except Exception:
-        logger.exception("Watchlist refresh failed, falling back to seed entries")
-        entries = manager.get_seed()
+    entries = manager.get_seed()
 
     async with session_factory() as session:
         await upsert_watchlist(session, entries)

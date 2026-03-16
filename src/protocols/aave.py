@@ -48,7 +48,7 @@ class AaveAdapter(ProtocolAdapter):
             borrowed = Decimal(str(borrow_entries[-1].get("totalLiquidityUSD", 0)))
 
         utilization = borrowed / supply if supply > 0 else Decimal("0")
-        tvl = supply - borrowed
+        tvl = supply
 
         return [
             MetricRecord(

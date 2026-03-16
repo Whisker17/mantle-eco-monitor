@@ -53,7 +53,7 @@ class RuleEngine:
             candidates.extend(await self._check_thresholds(snapshot))
 
             historic_max = await get_comparison_snapshot(
-                self.session, snapshot.entity, snapshot.metric_name, TimeWindow.ATH
+                self.session, snapshot.entity, snapshot.metric_name, TimeWindow.ATH, anchor_at=snapshot.collected_at
             )
             candidates.extend(check_ath(snapshot, historic_max))
 
@@ -64,7 +64,11 @@ class RuleEngine:
 
             for window in [TimeWindow.D7, TimeWindow.MTD]:
                 anchor = await get_comparison_snapshot(
-                    self.session, snapshot.entity, snapshot.metric_name, window
+                    self.session,
+                    snapshot.entity,
+                    snapshot.metric_name,
+                    window,
+                    anchor_at=snapshot.collected_at,
                 )
                 candidates.extend(check_decline(snapshot, anchor, window.value))
 
@@ -86,7 +90,11 @@ class RuleEngine:
         results: list[AlertCandidate] = []
         for window in [TimeWindow.D7, TimeWindow.MTD]:
             anchor = await get_comparison_snapshot(
-                self.session, snapshot.entity, snapshot.metric_name, window
+                self.session,
+                snapshot.entity,
+                snapshot.metric_name,
+                window,
+                anchor_at=snapshot.collected_at,
             )
             if anchor is None or anchor.value == 0:
                 continue
