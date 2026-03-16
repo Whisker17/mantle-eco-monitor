@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 from config.settings import Settings
+from src.admin.runtime import serialize_admin_value
 from src.api.deps import get_session_factory
 from src.ingestion.coingecko import CoinGeckoCollector
 from src.ingestion.defillama import DefiLlamaCollector
@@ -66,7 +67,7 @@ async def collect_job(
         return {
             "mode": "run",
             "job_id": job_id,
-            "result": result,
+            "result": serialize_admin_value(result),
         }
 
     session_factory = get_session_factory(settings) if settings is not None else None

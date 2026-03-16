@@ -53,6 +53,41 @@ class CoinGeckoCollector(BaseCollector):
 
         return records
 
+    async def collect_mnt_volume_history(self) -> list[MetricRecord]:
+        resp = await self._http.get(
+            f"{self.BASE}/coins/mantle/market_chart",
+            params={
+                "vs_currency": "usd",
+                "days": "max",
+                "interval": "daily",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return self._map_volume_history(data.get("total_volumes", []))
+
+    def _map_volume_history(self, rows: list[list[float | int]]) -> list[MetricRecord]:
+        records: list[MetricRecord] = []
+        for row in rows:
+            if len(row) < 2:
+                continue
+            timestamp_ms, volume = row[0], row[1]
+            if volume is None:
+                continue
+            records.append(
+                MetricRecord(
+                    scope="core",
+                    entity="mantle",
+                    metric_name="mnt_volume",
+                    value=Decimal(str(volume)),
+                    unit="usd",
+                    source_platform="coingecko",
+                    source_ref="https://www.coingecko.com/en/coins/mantle",
+                    collected_at=datetime.fromtimestamp(float(timestamp_ms) / 1000, tz=timezone.utc),
+                )
+            )
+        return records
+
     async def health_check(self) -> bool:
         try:
             resp = await self._http.get(f"{self.BASE}/ping")

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from typing import Awaitable, Callable
+from dataclasses import asdict, is_dataclass
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -34,3 +35,9 @@ def run_handler(
     args: argparse.Namespace,
 ) -> int:
     return asyncio.run(run_async_handler(handler, args))
+
+
+def serialize_admin_value(value: Any) -> Any:
+    if is_dataclass(value):
+        return asdict(value)
+    return value

@@ -87,6 +87,17 @@ async def test_defillama_collector_maps_chain_tvl(defillama_collector):
 
 
 @pytest.mark.asyncio
+async def test_defillama_collector_collect_chain_tvl_history_maps_all_points(defillama_collector):
+    records = await defillama_collector.collect_chain_tvl_history()
+
+    assert len(records) == 2
+    assert [record.value for record in records] == [Decimal("1523000000"), Decimal("1600000000")]
+    assert [record.collected_at.timestamp() for record in records] == [1710288000.0, 1710374400.0]
+    assert all(record.metric_name == "tvl" for record in records)
+    assert all(record.entity == "mantle" for record in records)
+
+
+@pytest.mark.asyncio
 async def test_defillama_collector_maps_stablecoin_supply(defillama_collector):
     records = await defillama_collector._collect_stablecoin_supply()
 

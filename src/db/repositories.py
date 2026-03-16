@@ -251,6 +251,8 @@ async def upsert_watchlist(
     session: AsyncSession, entries: list[dict]
 ) -> list[WatchlistProtocol]:
     result: list[WatchlistProtocol] = []
+    active_slugs = {entry["slug"] for entry in entries}
+    now = datetime.now(tz=timezone.utc)
     for entry in entries:
         metrics_val = _normalize_watchlist_metrics(entry.get("metrics"))
         existing = await session.execute(
@@ -266,8 +268,8 @@ async def upsert_watchlist(
                 is_pinned=entry.get("pinned", False),
                 metrics=metrics_val,
                 active=True,
-                added_at=datetime.now(tz=timezone.utc),
-                updated_at=datetime.now(tz=timezone.utc),
+                added_at=now,
+                updated_at=now,
             )
             session.add(proto)
         else:
@@ -277,8 +279,16 @@ async def upsert_watchlist(
             proto.is_pinned = entry.get("pinned", proto.is_pinned)
             proto.metrics = metrics_val
             proto.active = True
-            proto.updated_at = datetime.now(tz=timezone.utc)
+            proto.updated_at = now
         result.append(proto)
+
+    stale_stmt = select(WatchlistProtocol).where(WatchlistProtocol.active == True)
+    if active_slugs:
+        stale_stmt = stale_stmt.where(~WatchlistProtocol.slug.in_(active_slugs))
+    stale_rows = (await session.execute(stale_stmt)).scalars().all()
+    for proto in stale_rows:
+        proto.active = False
+        proto.updated_at = now
 
     await session.flush()
     return result

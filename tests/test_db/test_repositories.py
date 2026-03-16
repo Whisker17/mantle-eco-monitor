@@ -404,3 +404,52 @@ async def test_upsert_watchlist_rewrites_metrics_as_list(async_session):
     await async_session.refresh(existing)
 
     assert existing.metrics == ["tvl", "supply", "borrowed", "utilization"]
+
+
+@pytest.mark.asyncio
+async def test_upsert_watchlist_deactivates_entries_missing_from_seed(async_session):
+    now = datetime.now(tz=timezone.utc)
+    curated = WatchlistProtocol(
+        slug="aave-v3",
+        display_name="Aave V3",
+        category="lending",
+        monitoring_tier="special",
+        is_pinned=True,
+        metrics=["tvl"],
+        active=True,
+        added_at=now,
+        updated_at=now,
+    )
+    stale = WatchlistProtocol(
+        slug="curve-dex",
+        display_name="Curve",
+        category="dex",
+        monitoring_tier="dex",
+        is_pinned=False,
+        metrics=["tvl", "volume"],
+        active=True,
+        added_at=now,
+        updated_at=now,
+    )
+    async_session.add_all([curated, stale])
+    await async_session.commit()
+
+    await upsert_watchlist(
+        async_session,
+        [
+            {
+                "slug": "aave-v3",
+                "display_name": "Aave V3",
+                "category": "lending",
+                "tier": "special",
+                "pinned": True,
+                "metrics": ["tvl", "supply", "borrowed", "utilization"],
+            }
+        ],
+    )
+    await async_session.commit()
+    await async_session.refresh(curated)
+    await async_session.refresh(stale)
+
+    assert curated.active is True
+    assert stale.active is False

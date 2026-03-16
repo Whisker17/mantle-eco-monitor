@@ -49,21 +49,34 @@ class DefiLlamaCollector(BaseCollector):
         resp = await self._http.get(f"{self.BASE}/v2/historicalChainTvl/Mantle")
         resp.raise_for_status()
         data = resp.json()
-        if not data:
-            return []
-        latest = data[-1]
-        return [
-            MetricRecord(
-                scope="core",
-                entity="mantle",
-                metric_name="tvl",
-                value=Decimal(str(latest["tvl"])),
-                unit="usd",
-                source_platform="defillama",
-                source_ref="https://defillama.com/chain/Mantle",
-                collected_at=datetime.fromtimestamp(latest["date"], tz=timezone.utc),
+        return self._map_chain_tvl_rows(data[-1:] if data else [])
+
+    async def collect_chain_tvl_history(self) -> list[MetricRecord]:
+        resp = await self._http.get(f"{self.BASE}/v2/historicalChainTvl/Mantle")
+        resp.raise_for_status()
+        data = resp.json()
+        return self._map_chain_tvl_rows(data)
+
+    def _map_chain_tvl_rows(self, rows: list[dict]) -> list[MetricRecord]:
+        records: list[MetricRecord] = []
+        for row in rows:
+            tvl = row.get("tvl")
+            timestamp = row.get("date")
+            if tvl is None or timestamp is None:
+                continue
+            records.append(
+                MetricRecord(
+                    scope="core",
+                    entity="mantle",
+                    metric_name="tvl",
+                    value=Decimal(str(tvl)),
+                    unit="usd",
+                    source_platform="defillama",
+                    source_ref="https://defillama.com/chain/Mantle",
+                    collected_at=datetime.fromtimestamp(timestamp, tz=timezone.utc),
+                )
             )
-        ]
+        return records
 
     async def _collect_stablecoin_supply(self) -> list[MetricRecord]:
         resp = await self._http.get(f"{self.STABLES_BASE}/stablecoincharts/Mantle")
