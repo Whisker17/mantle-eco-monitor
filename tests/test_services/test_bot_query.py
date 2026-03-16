@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.db.models import AlertEvent, Base, MetricSnapshot, SourceRun, WatchlistProtocol
+from src.services.bot_catalog import build_bot_catalog
 from src.services.bot_query import BotQueryService
 
 
@@ -23,6 +24,15 @@ class FakeLLMClient:
 class ForbiddenSessionFactory:
     def __call__(self):
         raise AssertionError("session_factory should not be used")
+
+
+def test_metric_catalog_exposes_latest_and_history_capabilities():
+    catalog = build_bot_catalog()
+
+    assert "metric_latest" in catalog.intents
+    assert "metric_history" in catalog.intents
+    assert catalog.metric_aliases["TVL"] == "tvl"
+    assert catalog.metric_aliases["dex volume"] == "dex_volume"
 
 
 @pytest.fixture()
