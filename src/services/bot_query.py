@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -32,6 +33,8 @@ SUPPORTED_CAPABILITIES_TEXT = (
     "latest metrics, metric history, alerts, health status, source health, watchlist, "
     "and daily summaries"
 )
+
+logger = logging.getLogger(__name__)
 
 
 class BotQueryService:
@@ -101,26 +104,24 @@ class BotQueryService:
     async def _parse_intent(self, text: str) -> dict[str, Any]:
         deterministic_payload = self._parse_metric_intent_deterministically(text)
         if deterministic_payload is not None:
+            logger.debug("Bot query parser path=deterministic payload=%s", deterministic_payload)
             return deterministic_payload
 
+        parser_messages = self._build_intent_parser_messages(text)
+        logger.debug("Bot query parser path=llm question=%s", text)
         response = await self._llm_client.complete(
-            [
-                {
-                    "role": "system",
-                    "content": self._build_intent_parser_prompt(),
-                },
-                {
-                    "role": "user",
-                    "content": text,
-                },
-            ]
+            parser_messages,
+            response_format={"type": "json_object"},
         )
+        logger.debug("Bot query parser llm_response=%s", response)
         try:
             payload = json.loads(response)
         except json.JSONDecodeError:
             return {"intent": "unsupported"}
 
-        return self._validate_intent(payload)
+        validated = self._validate_intent(payload)
+        logger.debug("Bot query parser validated_payload=%s", validated)
+        return validated
 
     def _parse_metric_intent_deterministically(self, text: str) -> dict[str, Any] | None:
         normalized = self._normalize_query_text(text)
@@ -131,7 +132,13 @@ class BotQueryService:
         if not tokens:
             return None
 
-        if tokens[0] in {"query", "show", "get"}:
+        if tokens[:2] in (["what", "is"], ["what", "s"]):
+            tokens = tokens[2:]
+        elif tokens and tokens[0] == "whats":
+            tokens = tokens[1:]
+        if tokens and tokens[0] in {"query", "show", "get", "check", "current", "latest"}:
+            tokens = tokens[1:]
+        if tokens and tokens[0] == "the":
             tokens = tokens[1:]
         if len(tokens) < 2:
             return None
@@ -195,6 +202,42 @@ class BotQueryService:
             "A bare metric request defaults to metric_latest. "
             "If a message asks for a metric plus a day window like 7d or 30d, use metric_history."
         )
+
+    def _build_intent_parser_messages(self, text: str) -> list[dict[str, str]]:
+        return [
+            {
+                "role": "system",
+                "content": self._build_intent_parser_prompt(),
+            },
+            {
+                "role": "user",
+                "content": "query mantle tvl",
+            },
+            {
+                "role": "assistant",
+                "content": '{"intent":"metric_latest","entity":"mantle","metric_name":"tvl"}',
+            },
+            {
+                "role": "user",
+                "content": "show mantle tvl 7d",
+            },
+            {
+                "role": "assistant",
+                "content": '{"intent":"metric_history","entity":"mantle","metric_name":"tvl","days":7}',
+            },
+            {
+                "role": "user",
+                "content": "what is mantle dex volume",
+            },
+            {
+                "role": "assistant",
+                "content": '{"intent":"metric_latest","entity":"mantle","metric_name":"dex_volume"}',
+            },
+            {
+                "role": "user",
+                "content": text,
+            },
+        ]
 
     def _normalize_metric_payload(self, payload: dict[str, Any]) -> dict[str, str] | None:
         entity = payload.get("entity")

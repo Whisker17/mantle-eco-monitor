@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.db.models import AlertEvent, Base, MetricSnapshot, SourceRun, WatchlistProtocol
 from src.services.bot_catalog import build_bot_catalog
+from src.services import bot_query as bot_query_module
 from src.services.bot_query import BotQueryService
 
 
@@ -15,9 +16,11 @@ class FakeLLMClient:
     def __init__(self, responses: list[str]):
         self._responses = responses
         self.messages: list[list[dict]] = []
+        self.calls: list[dict] = []
 
-    async def complete(self, messages: list[dict]) -> str:
+    async def complete(self, messages: list[dict], **kwargs) -> str:
         self.messages.append(messages)
+        self.calls.append({"messages": messages, "kwargs": kwargs})
         return self._responses.pop(0)
 
 
@@ -25,9 +28,11 @@ class RejectIntentParseLLMClient:
     def __init__(self, answer: str):
         self.answer = answer
         self.messages: list[list[dict]] = []
+        self.calls: list[dict] = []
 
-    async def complete(self, messages: list[dict]) -> str:
+    async def complete(self, messages: list[dict], **kwargs) -> str:
         self.messages.append(messages)
+        self.calls.append({"messages": messages, "kwargs": kwargs})
         if "Map the user message to JSON" in messages[0]["content"]:
             raise AssertionError("deterministic parser should have handled this request")
         return self.answer
@@ -61,6 +66,32 @@ async def test_bot_query_service_routes_query_mantle_tvl_without_llm_parser(sess
 
 
 @pytest.mark.asyncio
+async def test_bot_query_service_routes_what_is_mantle_tvl_without_llm_parser(session_factory, seeded_data):
+    llm_client = RejectIntentParseLLMClient("Mantle TVL is $1.5K.")
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("what is mantle tvl", now=seeded_data)
+
+    assert result["intent"] == "metric_latest"
+    assert result["data"]["metric_name"] == "tvl"
+    assert result["answer"] == "Mantle TVL is $1.5K."
+    assert len(llm_client.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_routes_current_mantle_tvl_without_llm_parser(session_factory, seeded_data):
+    llm_client = RejectIntentParseLLMClient("Mantle TVL is $1.5K.")
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("current mantle tvl", now=seeded_data)
+
+    assert result["intent"] == "metric_latest"
+    assert result["data"]["metric_name"] == "tvl"
+    assert result["answer"] == "Mantle TVL is $1.5K."
+    assert len(llm_client.messages) == 1
+
+
+@pytest.mark.asyncio
 async def test_bot_query_service_routes_show_mantle_tvl_7d_to_metric_history_without_llm_parser(
     session_factory,
     seeded_data,
@@ -77,6 +108,19 @@ async def test_bot_query_service_routes_show_mantle_tvl_7d_to_metric_history_wit
 
 
 @pytest.mark.asyncio
+async def test_bot_query_service_routes_check_mantle_tvl_without_llm_parser(session_factory, seeded_data):
+    llm_client = RejectIntentParseLLMClient("Mantle TVL is $1.5K.")
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+
+    result = await service.handle_message("check mantle tvl", now=seeded_data)
+
+    assert result["intent"] == "metric_latest"
+    assert result["data"]["metric_name"] == "tvl"
+    assert result["answer"] == "Mantle TVL is $1.5K."
+    assert len(llm_client.messages) == 1
+
+
+@pytest.mark.asyncio
 async def test_bot_query_service_normalizes_llm_metric_latest_payload_before_dispatch(
     session_factory,
     seeded_data,
@@ -89,7 +133,7 @@ async def test_bot_query_service_normalizes_llm_metric_latest_payload_before_dis
     )
     service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
 
-    result = await service.handle_message("what is Mantle TVL", now=seeded_data)
+    result = await service.handle_message("please tell me Mantle TVL", now=seeded_data)
 
     assert result["intent"] == "metric_latest"
     assert result["data"]["entity"] == "mantle"
@@ -107,7 +151,7 @@ async def test_bot_query_service_normalizes_llm_metric_alias_before_dispatch(ses
     )
     service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
 
-    result = await service.handle_message("what is Mantle DEX volume", now=seeded_data)
+    result = await service.handle_message("please tell me Mantle DEX volume", now=seeded_data)
 
     assert result["intent"] == "metric_latest"
     assert result["data"]["entity"] == "mantle"
@@ -128,7 +172,7 @@ async def test_bot_query_service_parser_prompt_includes_metric_catalog_constrain
     )
     service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
 
-    await service.handle_message("what is mantle tvl", now=seeded_data)
+    await service.handle_message("please tell me mantle tvl", now=seeded_data)
 
     parser_prompt = llm_client.messages[0]
     assert "metric_latest" in parser_prompt[0]["content"]
@@ -137,6 +181,52 @@ async def test_bot_query_service_parser_prompt_includes_metric_catalog_constrain
     assert "dex_volume" in parser_prompt[0]["content"]
     assert "mantle" in parser_prompt[0]["content"]
     assert "bare metric request defaults to metric_latest" in parser_prompt[0]["content"]
+    assert len(parser_prompt) > 2
+    assert parser_prompt[1]["role"] == "user"
+    assert parser_prompt[2]["role"] == "assistant"
+    assert "query mantle tvl" in parser_prompt[1]["content"].lower()
+    assert '"intent":"metric_latest"' in parser_prompt[2]["content"]
+    assert llm_client.calls[0]["kwargs"]["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_logs_deterministic_parser_path(session_factory, seeded_data, monkeypatch):
+    llm_client = RejectIntentParseLLMClient("Mantle TVL is $1.5K.")
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+    captured: list[str] = []
+
+    def fake_debug(message, *args):
+        captured.append(message % args if args else message)
+
+    monkeypatch.setattr(bot_query_module.logger, "debug", fake_debug)
+
+    await service.handle_message("query mantle tvl", now=seeded_data)
+
+    assert any("path=deterministic" in message for message in captured)
+    assert any("metric_latest" in message for message in captured)
+
+
+@pytest.mark.asyncio
+async def test_bot_query_service_logs_llm_parser_and_normalized_payload(session_factory, seeded_data, monkeypatch):
+    llm_client = FakeLLMClient(
+        [
+            '{"intent":"metric_latest","entity":"Mantle","metric_name":"TVL"}',
+            "Mantle TVL is $1.5K.",
+        ]
+    )
+    service = BotQueryService(session_factory=session_factory, llm_client=llm_client)
+    captured: list[str] = []
+
+    def fake_debug(message, *args):
+        captured.append(message % args if args else message)
+
+    monkeypatch.setattr(bot_query_module.logger, "debug", fake_debug)
+
+    await service.handle_message("please tell me mantle tvl", now=seeded_data)
+
+    assert any("path=llm" in message for message in captured)
+    assert any("Mantle" in message for message in captured)
+    assert any("tvl" in message for message in captured)
 
 
 @pytest.fixture()
