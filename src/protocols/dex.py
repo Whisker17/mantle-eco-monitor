@@ -7,6 +7,7 @@ from decimal import Decimal
 import httpx
 
 from src.ingestion.base import MetricRecord
+from src.ingestion.defillama import MANTLE_DEX_OVERVIEW_PATH, extract_mantle_dex_protocol_volume
 from src.protocols.base import ProtocolAdapter
 
 logger = logging.getLogger(__name__)
@@ -50,11 +51,10 @@ class DexAdapter(ProtocolAdapter):
         ]
 
     async def _collect_volume(self, http: httpx.AsyncClient) -> list[MetricRecord]:
-        resp = await http.get(f"https://api.llama.fi/summary/dexs/{self._slug}")
-        if resp.status_code >= 400:
-            return []
+        resp = await http.get(f"https://api.llama.fi{MANTLE_DEX_OVERVIEW_PATH}")
+        resp.raise_for_status()
         data = resp.json()
-        total_24h = data.get("total24h")
+        total_24h = extract_mantle_dex_protocol_volume(data, self._slug)
         if total_24h is None:
             return []
         return [

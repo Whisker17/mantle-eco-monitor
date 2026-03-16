@@ -118,3 +118,30 @@ async def test_defillama_collect_returns_all_core_metrics(defillama_collector):
 def test_defillama_source_platform():
     collector = DefiLlamaCollector()
     assert collector.source_platform == "defillama"
+
+
+@pytest.mark.asyncio
+async def test_defillama_collect_dex_volume_uses_mantle_chain_volume_for_multichain_dex():
+    protocol_payload = {
+        "protocols": [
+            {
+                "displayName": "Uniswap V3",
+                "module": "uniswap-v3",
+                "slug": "uniswap-v3",
+                "total24h": 42_932,
+            }
+        ]
+    }
+    transport = FakeTransport(
+        {
+            "overview/dexs/Mantle": protocol_payload,
+            "summary/dexs/uniswap-v3": {"total24h": 492_677_436},
+        }
+    )
+    collector = DefiLlamaCollector(http_client=httpx.AsyncClient(transport=transport))
+
+    records = await collector.collect_dex_volume("uniswap-v3")
+
+    assert len(records) == 1
+    assert records[0].metric_name == "volume"
+    assert records[0].value == Decimal("42932")

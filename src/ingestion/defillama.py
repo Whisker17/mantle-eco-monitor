@@ -10,6 +10,20 @@ from src.ingestion.base import BaseCollector, MetricRecord
 
 logger = logging.getLogger(__name__)
 
+MANTLE_DEX_OVERVIEW_PATH = "/overview/dexs/Mantle"
+
+
+def extract_mantle_dex_protocol_volume(payload: dict, slug: str) -> Decimal | None:
+    protocols = payload.get("protocols", [])
+    for protocol in protocols:
+        if protocol.get("slug") != slug and protocol.get("module") != slug:
+            continue
+        total_24h = protocol.get("total24h")
+        if total_24h is None:
+            return None
+        return Decimal(str(total_24h))
+    return None
+
 
 class DefiLlamaCollector(BaseCollector):
     BASE = "https://api.llama.fi"
@@ -73,7 +87,7 @@ class DefiLlamaCollector(BaseCollector):
         ]
 
     async def _collect_chain_dex_volume(self) -> list[MetricRecord]:
-        resp = await self._http.get(f"{self.BASE}/overview/dexs/Mantle")
+        resp = await self._http.get(f"{self.BASE}{MANTLE_DEX_OVERVIEW_PATH}")
         resp.raise_for_status()
         data = resp.json()
         chart = data.get("totalDataChart", [])
@@ -142,10 +156,10 @@ class DefiLlamaCollector(BaseCollector):
         ]
 
     async def collect_dex_volume(self, slug: str) -> list[MetricRecord]:
-        resp = await self._http.get(f"{self.BASE}/summary/dexs/{slug}")
+        resp = await self._http.get(f"{self.BASE}{MANTLE_DEX_OVERVIEW_PATH}")
         resp.raise_for_status()
         data = resp.json()
-        total_24h = data.get("total24h")
+        total_24h = extract_mantle_dex_protocol_volume(data, slug)
         if total_24h is None:
             return []
         return [
