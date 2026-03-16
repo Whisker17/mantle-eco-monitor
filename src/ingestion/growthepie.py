@@ -11,10 +11,6 @@ from src.ingestion.base import BaseCollector, MetricRecord
 logger = logging.getLogger(__name__)
 
 METRIC_KEY_MAP = {
-    "daa": [
-        ("daily_active_users", "count"),
-        ("active_addresses", "count"),
-    ],
     "txcount": [
         ("chain_transactions", "count"),
     ],

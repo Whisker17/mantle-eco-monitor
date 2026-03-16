@@ -48,6 +48,19 @@ def test_dune_collector_maps_query_rows_to_metric_records(fake_dune_client):
     assert records[0].source_platform == "dune"
 
 
+def test_dune_collector_maps_active_addresses_rows_to_metric_records(fake_dune_client):
+    collector = DuneCollector(fake_dune_client)
+
+    records = collector._map_rows(
+        metric_name="active_addresses",
+        rows=[{"day": "2026-03-13", "value": 54321}],
+    )
+
+    assert len(records) == 1
+    assert records[0].metric_name == "active_addresses"
+    assert records[0].value == Decimal("54321")
+
+
 def test_dune_collector_maps_multiple_rows(fake_dune_client):
     collector = DuneCollector(fake_dune_client)
 

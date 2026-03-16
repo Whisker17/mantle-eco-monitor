@@ -22,17 +22,14 @@ def test_growthepie_collector_maps_daa_to_two_metrics(sample_growthepie_data):
 
     mantle_records = [r for r in records if r.entity == "mantle"]
     names = {r.metric_name for r in mantle_records}
-    assert "daily_active_users" in names
-    assert "active_addresses" in names
     assert "chain_transactions" in names
+    assert "daily_active_users" not in names
+    assert "active_addresses" not in names
 
 
 def test_growthepie_collector_maps_values_correctly(sample_growthepie_data):
     collector = GrowthepieCollector()
     records = collector._map_rows(sample_growthepie_data)
-
-    dau = next(r for r in records if r.metric_name == "daily_active_users")
-    assert dau.value == Decimal("42000")
 
     txcount = next(r for r in records if r.metric_name == "chain_transactions")
     assert txcount.value == Decimal("150000")
@@ -69,8 +66,6 @@ async def test_growthepie_collect_uses_current_public_fundamentals_endpoint(samp
     records = await collector.collect()
 
     assert {r.metric_name for r in records} == {
-        "daily_active_users",
-        "active_addresses",
         "chain_transactions",
         "mnt_market_cap",
     }

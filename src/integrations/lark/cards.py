@@ -9,7 +9,8 @@ UTC_PLUS_8 = timezone(timedelta(hours=8))
 
 METRIC_LABELS = {
     "tvl": "TVL (Total Value Locked)",
-    "daily_active_users": "Daily Active Users",
+    "daily_active_users": "Daily Active Users (7D Rolling Average)",
+    "active_addresses": "Active Addresses",
     "chain_transactions": "Chain Transactions",
     "dex_volume": "DEX Volume",
     "stablecoin_supply": "Stablecoin Supply",
@@ -35,7 +36,7 @@ SOURCE_LABELS = {
 }
 
 ACTION_REQUIRED_PLACEHOLDER = (
-    "**Action Required:**\n"
+    "**⚡ Action Required:**\n"
     "- Social: Review alert context and refine for posting\n"
     "- Design: Prepare metric card or lightweight visual\n"
     "- Target post window: Within 6 hours of alert"
@@ -125,6 +126,10 @@ def _header_template(alert: dict) -> str:
     return "green"
 
 
+def _title_prefix(alert: dict) -> str:
+    return "🔴" if _is_downward(alert) else "🟢"
+
+
 def _format_movement(alert: dict) -> str:
     change_pct = _parse_decimal(alert.get("change_pct"))
     window = _format_window(alert.get("time_window"))
@@ -133,7 +138,7 @@ def _format_movement(alert: dict) -> str:
 
     percent = change_pct * Decimal("100")
     sign = "+" if percent > 0 else ""
-    return f"{sign}{_format_decimal(percent)}% ({window})"
+    return f"{sign}{percent.quantize(Decimal('0.01'))}% ({window})"
 
 
 def _format_detected(value: str | None) -> str:
@@ -144,7 +149,7 @@ def _format_detected(value: str | None) -> str:
     if detected_at.tzinfo is None:
         detected_at = detected_at.replace(tzinfo=UTC)
     localized = detected_at.astimezone(UTC_PLUS_8)
-    return f"{localized.strftime('%B')} {localized.day}, {localized.year} - {localized.strftime('%H:%M')} UTC+8"
+    return f"{localized.strftime('%B')} {localized.day}, {localized.year} - {localized.strftime('%H:%M')} SGT"
 
 
 def _guess_source_label(source_ref: str | None) -> str | None:
@@ -179,6 +184,61 @@ def _format_source(alert: dict) -> str:
     return "Unknown"
 
 
+def _compact_number(value: Decimal, *, currency: bool) -> str:
+    abs_value = abs(value)
+    suffix = ""
+    divisor = Decimal("1")
+    if abs_value >= Decimal("1000000000000"):
+        suffix = "T"
+        divisor = Decimal("1000000000000")
+    elif abs_value >= Decimal("1000000000"):
+        suffix = "B"
+        divisor = Decimal("1000000000")
+    elif abs_value >= Decimal("1000000"):
+        suffix = "M"
+        divisor = Decimal("1000000")
+    elif abs_value >= Decimal("1000"):
+        suffix = "K"
+        divisor = Decimal("1000")
+
+    scaled = value / divisor
+    prefix = "$" if currency else ""
+    if suffix:
+        return f"{prefix}~{scaled.quantize(Decimal('0.1'))}{suffix}"
+    return f"{prefix}{_format_decimal(value)}"
+
+
+def _looks_like_currency(text: str) -> bool:
+    return "$" in text or text.lower().endswith(("m", "b", "k", "t")) and "$" in text
+
+
+def _is_currency_metric(metric_name: str) -> bool:
+    return metric_name in {
+        "tvl",
+        "dex_volume",
+        "stablecoin_supply",
+        "stablecoin_mcap",
+        "stablecoin_transfer_volume",
+        "mnt_market_cap",
+        "mnt_volume",
+        "tvs",
+        "supply",
+        "borrowed",
+        "volume",
+    }
+
+
+def _format_current_value(alert: dict) -> str:
+    formatted_value = alert.get("formatted_value")
+    if formatted_value:
+        return str(formatted_value)
+
+    raw = _parse_decimal(alert.get("current_value"))
+    if raw is None:
+        return ""
+    return _compact_number(raw, currency=_is_currency_metric(alert["metric_name"]))
+
+
 def _humanize_reason(reason: str | None) -> str:
     if not reason:
         return "MONITORED ALERT"
@@ -201,17 +261,22 @@ def _derive_status(alert: dict) -> str:
 
 
 def build_alert_card(alert: dict) -> dict:
+    movement_icon = "📉" if _is_downward(alert) else "📈"
     blocks = [
-        f"**Metric:** {_humanize_metric_name(alert['metric_name'])}",
-        f"**Movement:** {_format_movement(alert)}",
-        f"**Current Value:** {alert.get('formatted_value') or alert.get('current_value', '')}",
-        f"**Status:** {_derive_status(alert)}",
-        f"**Source:** {_format_source(alert)}",
-        f"**Detected:** {_format_detected(alert.get('detected_at'))}",
-        "**Suggested Draft Copy:** Placeholder - draft copy not generated yet.",
+        f"**📊 Metric:** {_humanize_metric_name(alert['metric_name'])}",
+        f"**{movement_icon} Movement:** {_format_movement(alert)}",
+        f"**💰 Current Value:** {_format_current_value(alert)}",
+        f"**🏆 Status:** {_derive_status(alert)}",
+        f"**📡 Source:** {_format_source(alert)}",
+        f"**⏰ Detected:** {_format_detected(alert.get('detected_at'))}",
+        "**✍️ Suggested Draft Copy:** Placeholder - draft copy not generated yet.",
         ACTION_REQUIRED_PLACEHOLDER,
     ]
-    return _base_card("MANTLE METRICS ALERT", blocks, template=_header_template(alert))
+    return _base_card(
+        f"{_title_prefix(alert)} MANTLE METRICS ALERT",
+        blocks,
+        template=_header_template(alert),
+    )
 
 
 def build_daily_summary_card(summary: dict) -> dict:
