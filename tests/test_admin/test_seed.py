@@ -9,7 +9,7 @@ from src.admin.rebuild import (
     REBUILD_JOB_ORDER,
     rebuild_data_quality_history,
 )
-from src.admin.seed import seed_alert_spike
+from src.admin.seed import seed_alert_scenario, seed_alert_spike
 from src.db.models import AlertEvent, MetricSnapshot
 from src.scheduler.runtime import JobResult
 
@@ -105,6 +105,40 @@ async def test_seed_alert_spike_skips_rule_evaluation_when_disabled(session_fact
 
     assert snapshots == 2
     assert alerts == 0
+
+
+async def test_seed_alert_scenario_creates_expected_threshold_alerts(session_factory):
+    result = await seed_alert_scenario(session_factory, "threshold_up_7d_tvl")
+
+    assert result["scenario"] == "threshold_up_7d_tvl"
+    assert result["snapshots_inserted"] == 8
+    assert result["alerts_created"] >= 1
+    assert "threshold_25pct_7d" in result["expected_trigger_reasons"]
+    assert "threshold_25pct_7d" in result["actual_trigger_reasons"]
+
+
+async def test_seed_alert_scenario_keeps_low_coverage_series_silent(session_factory):
+    result = await seed_alert_scenario(session_factory, "no_alert_low_coverage_7d")
+
+    assert result["scenario"] == "no_alert_low_coverage_7d"
+    assert result["snapshots_inserted"] == 4
+    assert result["alerts_created"] == 0
+    assert result["actual_trigger_reasons"] == []
+
+    async with session_factory() as session:
+        alerts = (await session.execute(select(func.count()).select_from(AlertEvent))).scalar()
+
+    assert alerts == 0
+
+
+async def test_seed_alert_scenario_cooldown_repeat_block_suppresses_second_duplicate(session_factory):
+    result = await seed_alert_scenario(session_factory, "cooldown_repeat_block")
+
+    assert result["scenario"] == "cooldown_repeat_block"
+    assert result["first_alerts_created"] >= 1
+    assert result["second_alerts_created"] == 0
+    assert "threshold_25pct_7d" in result["first_trigger_reasons"]
+    assert result["second_trigger_reasons"] == []
 
 
 def test_rebuild_data_quality_history_targets_include_core_tvl_and_mnt_volume():
