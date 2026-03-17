@@ -6,10 +6,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from config.settings import Settings
-from src.db.models import AlertEvent
+from src.db.models import AlertEvent, WatchlistProtocol
 from src.db.repositories import (
     create_delivery_event,
     get_delivery_event_by_logical_key,
@@ -53,6 +54,7 @@ class NotificationService:
             return
 
         groups = self._group_alerts_by_entity(alerts)
+        watchlist_map = await self._load_watchlist_map(set(groups.keys()))
 
         if self._settings.lark_delivery_enabled:
             chat_id = self._resolve_chat_id("alert")
@@ -63,6 +65,7 @@ class NotificationService:
                     primary = group[0]
                     logical_key = self._logical_key("lark_alert", "alert_group", f"{entity}:{primary.id}")
                     payloads = [self._serialize_alert(a) for a in group]
+                    self._enrich_payloads(payloads, watchlist_map)
                     await self._deliver_card(
                         chat_id=chat_id,
                         channel="lark_alert",
@@ -74,7 +77,7 @@ class NotificationService:
 
         if self._settings.alert_local_output_enabled:
             for entity, group in groups.items():
-                await self._deliver_local_alert_group(group)
+                await self._deliver_local_alert_group(group, watchlist_map)
 
     async def deliver_summary(self, summary_key: str, card: dict) -> None:
         if not self._settings.lark_delivery_enabled:
@@ -155,10 +158,15 @@ class NotificationService:
             groups.setdefault(alert.entity, []).append(alert)
         return groups
 
-    async def _deliver_local_alert_group(self, group: list[AlertEvent]) -> None:
+    async def _deliver_local_alert_group(
+        self,
+        group: list[AlertEvent],
+        watchlist_map: dict[str, dict[str, str]],
+    ) -> None:
         primary = group[0]
         logical_key = self._logical_key("local_alert_log", "alert_group", f"{primary.entity}:{primary.id}")
         payloads = [self._serialize_alert(a) for a in group]
+        self._enrich_payloads(payloads, watchlist_map)
 
         async with self._session_factory() as session:
             delivery = await get_delivery_event_by_logical_key(session, logical_key)
@@ -233,6 +241,7 @@ class NotificationService:
 
     def _normalize_local_block(self, block: str) -> str:
         prefix_map = {
+            "🏢 Protocol:": "Protocol:",
             "📊 Metric:": "Metric:",
             "📊 Signals Detected:": "Signals Detected:",
             "📈 Movement:": "Movement:",
@@ -259,8 +268,34 @@ class NotificationService:
         lines[0] = first
         return "\n".join(lines)
 
+    async def _load_watchlist_map(self, entities: set[str]) -> dict[str, dict[str, str]]:
+        if not entities:
+            return {}
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(WatchlistProtocol).where(WatchlistProtocol.slug.in_(entities))
+            )
+            protocols = result.scalars().all()
+            return {
+                p.slug: {"display_name": p.display_name, "category": p.category}
+                for p in protocols
+            }
+
+    @staticmethod
+    def _enrich_payloads(
+        payloads: list[dict[str, str | bool | None]],
+        watchlist_map: dict[str, dict[str, str]],
+    ) -> None:
+        for payload in payloads:
+            info = watchlist_map.get(payload.get("entity", ""), {})
+            if info.get("display_name"):
+                payload["display_name"] = info["display_name"]
+            if info.get("category"):
+                payload["category"] = info["category"]
+
     def _serialize_alert(self, alert: AlertEvent) -> dict[str, str | bool | None]:
         return {
+            "scope": alert.scope,
             "entity": alert.entity,
             "metric_name": alert.metric_name,
             "current_value": _decimal_to_str(alert.current_value),

@@ -438,6 +438,140 @@ def test_build_daily_summary_card_categorises_metrics_and_formats_alerts():
     assert not any("**Sources**" in b for b in text_blocks)
 
 
+def test_build_alert_card_ecosystem_protocol_shows_entity_in_title_and_body():
+    card = build_alert_card(
+        {
+            "scope": "ecosystem",
+            "entity": "fluxion-network",
+            "display_name": "Fluxion Network",
+            "category": "dex",
+            "metric_name": "volume",
+            "formatted_value": None,
+            "current_value": "1500000",
+            "time_window": "7d",
+            "change_pct": "0.3032",
+            "severity": "high",
+            "trigger_reason": "threshold_30pct_7d",
+            "source_platform": "defillama",
+            "source_ref": "https://defillama.com/protocol/fluxion-network",
+            "detected_at": datetime(2026, 3, 17, 9, 27, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        }
+    )
+
+    text_blocks = _markdown_text_blocks(card)
+
+    assert card["header"]["title"]["content"] == "\U0001f7e2 FLUXION NETWORK \u2014 MANTLE ECO ALERT"
+    assert card["header"]["template"] == "green"
+    assert text_blocks[0] == "**\U0001f3e2 Protocol:** Fluxion Network (DEX)"
+    assert text_blocks[1] == "**\U0001f4ca Metric:** Volume"
+    assert text_blocks[2] == "**\U0001f4c8 Movement:** +30.32% (7D)"
+    assert text_blocks[3] == "**\U0001f4b0 Current Value:** $~1.5M"
+    assert text_blocks[4] == "**\U0001f3c6 Status:** SIGNIFICANT UPWARD MOVE"
+    assert text_blocks[5] == "**\U0001f4e1 Source:** DefiLlama (https://defillama.com/protocol/fluxion-network)"
+
+
+def test_build_consolidated_alert_card_ecosystem_multi_signal_shows_entity():
+    alerts = [
+        {
+            "scope": "ecosystem",
+            "entity": "fluxion-network",
+            "display_name": "Fluxion Network",
+            "category": "dex",
+            "metric_name": "tvl",
+            "formatted_value": None,
+            "current_value": "575600",
+            "time_window": "7d",
+            "change_pct": "0.2842",
+            "severity": "high",
+            "trigger_reason": "threshold_28pct_7d",
+            "source_platform": "defillama",
+            "source_ref": "https://defillama.com/protocol/fluxion-network",
+            "detected_at": datetime(2026, 3, 17, 9, 27, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+        {
+            "scope": "ecosystem",
+            "entity": "fluxion-network",
+            "display_name": "Fluxion Network",
+            "category": "dex",
+            "metric_name": "volume",
+            "formatted_value": None,
+            "current_value": "165700",
+            "time_window": "7d",
+            "change_pct": "6.4276",
+            "severity": "critical",
+            "trigger_reason": "threshold_642pct_7d",
+            "source_platform": "defillama",
+            "source_ref": "https://defillama.com/protocol/fluxion-network",
+            "detected_at": datetime(2026, 3, 17, 9, 27, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+        {
+            "scope": "ecosystem",
+            "entity": "fluxion-network",
+            "display_name": "Fluxion Network",
+            "category": "dex",
+            "metric_name": "multi_signal",
+            "formatted_value": None,
+            "current_value": "575600",
+            "time_window": "combined",
+            "change_pct": None,
+            "severity": "critical",
+            "trigger_reason": "multi_signal:tvl, volume",
+            "source_platform": None,
+            "source_ref": None,
+            "detected_at": datetime(2026, 3, 17, 9, 27, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+    ]
+    card = build_consolidated_alert_card(alerts)
+    blocks = _markdown_text_blocks(card)
+
+    assert card["header"]["title"]["content"] == "\U0001f7e2 FLUXION NETWORK \u2014 MANTLE ECO ALERT"
+    assert blocks[0] == "**\U0001f3e2 Protocol:** Fluxion Network (DEX)"
+    signals_block = next(b for b in blocks if "Signals Detected" in b)
+    assert "TVL" in signals_block
+    assert "Volume" in signals_block
+    status_block = next(b for b in blocks if "Status:" in b)
+    assert "MULTI-SIGNAL" in status_block
+
+
+def test_build_alert_card_ecosystem_without_display_name_falls_back():
+    card = build_alert_card(
+        {
+            "scope": "ecosystem",
+            "entity": "merchant-moe",
+            "metric_name": "volume",
+            "formatted_value": "$2.1M",
+            "time_window": "7d",
+            "change_pct": "0.40",
+            "severity": "high",
+            "trigger_reason": "threshold_40pct_7d",
+            "source_platform": "defillama",
+            "source_ref": "https://defillama.com/protocol/merchant-moe",
+            "detected_at": datetime(2026, 3, 17, 9, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        }
+    )
+
+    text_blocks = _markdown_text_blocks(card)
+
+    assert card["header"]["title"]["content"] == "\U0001f7e2 MERCHANT MOE \u2014 MANTLE ECO ALERT"
+    assert text_blocks[0] == "**\U0001f3e2 Protocol:** Merchant Moe"
+    assert text_blocks[1] == "**\U0001f4ca Metric:** Volume"
+
+
 def test_build_bot_reply_card_includes_answer_and_source_urls():
     card = build_bot_reply_card(
         answer="Mantle TVL is $1.5B.",

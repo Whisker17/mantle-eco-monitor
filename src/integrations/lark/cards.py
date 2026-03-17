@@ -35,6 +35,20 @@ SOURCE_LABELS = {
     "dune": "Dune",
 }
 
+CATEGORY_LABELS = {
+    "dex": "DEX",
+    "lending": "Lending",
+    "yield": "Yield",
+    "bridge": "Bridge",
+    "derivatives": "Derivatives",
+    "index": "Index",
+    "rwa": "RWA",
+    "stablecoin": "Stablecoin",
+    "liquid_staking": "Liquid Staking",
+    "cdp": "CDP",
+    "perps": "Perps",
+}
+
 ACTION_REQUIRED_PLACEHOLDER = (
     "**⚡ Action Required:**\n"
     "- Social: Review alert context and refine for posting\n"
@@ -260,9 +274,38 @@ def _derive_status(alert: dict) -> str:
     return _humanize_reason(alert.get("trigger_reason"))
 
 
+def _is_ecosystem_alert(alert: dict) -> bool:
+    scope = alert.get("scope", "")
+    if scope:
+        return scope == "ecosystem"
+    return alert.get("entity", "mantle") != "mantle"
+
+
+def _format_entity_title(alert: dict) -> str:
+    if not _is_ecosystem_alert(alert):
+        return "MANTLE METRICS ALERT"
+    display_name = alert.get("display_name") or _humanize_entity(alert.get("entity", ""))
+    return f"{display_name.upper()} \u2014 MANTLE ECO ALERT"
+
+
+def _format_protocol_line(alert: dict) -> str | None:
+    if not _is_ecosystem_alert(alert):
+        return None
+    display_name = alert.get("display_name") or _humanize_entity(alert.get("entity", ""))
+    category = alert.get("category", "")
+    category_label = CATEGORY_LABELS.get(category, category.capitalize()) if category else ""
+    if category_label:
+        return f"**\U0001f3e2 Protocol:** {display_name} ({category_label})"
+    return f"**\U0001f3e2 Protocol:** {display_name}"
+
+
 def build_alert_card(alert: dict) -> dict:
     movement_icon = "📉" if _is_downward(alert) else "📈"
-    blocks = [
+    blocks: list[str] = []
+    protocol_line = _format_protocol_line(alert)
+    if protocol_line:
+        blocks.append(protocol_line)
+    blocks.extend([
         f"**📊 Metric:** {_humanize_metric_name(alert['metric_name'])}",
         f"**{movement_icon} Movement:** {_format_movement(alert)}",
         f"**💰 Current Value:** {_format_current_value(alert)}",
@@ -271,9 +314,9 @@ def build_alert_card(alert: dict) -> dict:
         f"**⏰ Detected:** {_format_detected(alert.get('detected_at'))}",
         "**✍️ Suggested Draft Copy:** Placeholder - draft copy not generated yet.",
         ACTION_REQUIRED_PLACEHOLDER,
-    ]
+    ])
     return _base_card(
-        f"{_title_prefix(alert)} MANTLE METRICS ALERT",
+        f"{_title_prefix(alert)} {_format_entity_title(alert)}",
         blocks,
         template=_header_template(alert),
     )
@@ -298,6 +341,10 @@ def build_consolidated_alert_card(alerts: list[dict]) -> dict:
     primary_for_header = next((a for a in metric_alerts if _is_downward(a)), primary) if has_downward else primary
 
     blocks: list[str] = []
+
+    protocol_line = _format_protocol_line(primary)
+    if protocol_line:
+        blocks.append(protocol_line)
 
     if len(by_metric) == 1:
         rep = list(by_metric.values())[0]
@@ -332,7 +379,7 @@ def build_consolidated_alert_card(alerts: list[dict]) -> dict:
     blocks.append(ACTION_REQUIRED_PLACEHOLDER)
 
     return _base_card(
-        f"{_title_prefix(primary_for_header)} MANTLE METRICS ALERT",
+        f"{_title_prefix(primary_for_header)} {_format_entity_title(primary_for_header)}",
         blocks,
         template=_header_template(primary_for_header),
     )
