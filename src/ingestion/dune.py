@@ -198,6 +198,7 @@ class DuneCollector(BaseCollector):
 
             records.append(
                 self._build_record(
+                    scope="stablecoin",
                     entity=entity,
                     metric_name="stablecoin_transfer_volume",
                     value=volume,
@@ -207,6 +208,7 @@ class DuneCollector(BaseCollector):
             )
             records.append(
                 self._build_record(
+                    scope="stablecoin",
                     entity=entity,
                     metric_name="stablecoin_transfer_tx_count",
                     value=tx_count,
@@ -265,6 +267,7 @@ class DuneCollector(BaseCollector):
     def _build_record(
         self,
         *,
+        scope: str = "core",
         entity: str,
         metric_name: str,
         value: Decimal,
@@ -272,7 +275,7 @@ class DuneCollector(BaseCollector):
         collected_at: datetime,
     ) -> MetricRecord:
         return MetricRecord(
-            scope="core",
+            scope=scope,
             entity=entity,
             metric_name=metric_name,
             value=value,

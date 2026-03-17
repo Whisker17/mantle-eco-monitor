@@ -134,6 +134,11 @@ def test_dune_collector_maps_stablecoin_breakdown_rows_to_token_and_aggregate_me
     assert by_key[("mantle:USDC", "stablecoin_transfer_volume")].value == Decimal("30")
     assert by_key[("mantle:USDC", "stablecoin_transfer_tx_count")].value == Decimal("2")
     assert by_key[("mantle", "stablecoin_transfer_volume")].value == Decimal("150.5")
+    assert by_key[("mantle:USDT", "stablecoin_transfer_volume")].scope == "stablecoin"
+    assert by_key[("mantle:USDT", "stablecoin_transfer_tx_count")].scope == "stablecoin"
+    assert by_key[("mantle:USDC", "stablecoin_transfer_volume")].scope == "stablecoin"
+    assert by_key[("mantle:USDC", "stablecoin_transfer_tx_count")].scope == "stablecoin"
+    assert by_key[("mantle", "stablecoin_transfer_volume")].scope == "core"
 
 
 def test_dune_collector_source_platform(fake_dune_client):
