@@ -123,4 +123,5 @@ async def test_daily_summary_service_summarizes_previous_shanghai_day_and_sends_
         if element["tag"] == "markdown"
     ]
     assert any("TVL finished higher and triggered a strong alert." in block for block in text_blocks)
-    assert any("https://defillama.com/chain/Mantle" in block for block in text_blocks)
+    assert any("Core Metrics" in block and "DefiLlama" in block for block in text_blocks)
+    assert any("Mantle / TVL" in block for block in text_blocks)

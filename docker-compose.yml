@@ -20,6 +20,8 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-monitor}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-mantle_monitor}
+    volumes:
+      - ./logs:/app/logs
     depends_on:
       db:
         condition: service_healthy

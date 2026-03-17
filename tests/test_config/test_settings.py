@@ -32,6 +32,8 @@ def test_settings_loads_dune_query_ids_from_env_keys(tmp_path):
                 "DUNE_CHAIN_TRANSACTIONS_QUERY_ID=3",
                 "DUNE_DEX_VOLUME_QUERY_ID=5",
                 "DUNE_STABLECOIN_VOLUME_QUERY_ID=4",
+                "ALERT_LOCAL_OUTPUT_ENABLED=true",
+                "ALERT_LOCAL_OUTPUT_DIR=/tmp/alert-logs",
             ]
         ),
         encoding="utf-8",
@@ -44,6 +46,8 @@ def test_settings_loads_dune_query_ids_from_env_keys(tmp_path):
     assert settings.dune_active_addresses_query_id == 2
     assert settings.dune_chain_transactions_query_id == 3
     assert settings.dune_stablecoin_volume_query_id == 4
+    assert settings.alert_local_output_enabled is True
+    assert settings.alert_local_output_dir == "/tmp/alert-logs"
 
 
 def test_settings_defaults():
@@ -54,6 +58,8 @@ def test_settings_defaults():
 
     assert settings.ai_enrichment_enabled is False
     assert settings.lark_delivery_enabled is False
+    assert settings.alert_local_output_enabled is False
+    assert settings.alert_local_output_dir == "logs/alerts"
     assert settings.lark_bot_enabled is False
     assert settings.bot_external_actions_enabled is False
     assert settings.scheduler_enabled is True
@@ -119,6 +125,8 @@ def test_settings_allow_lark_and_llm_overrides():
         llm_app_name="mantle-openrouter",
         llm_app_url="https://example.com/mantle-openrouter",
         llm_timeout_seconds=45,
+        alert_local_output_enabled=True,
+        alert_local_output_dir="/var/tmp/alerts",
     )
 
     assert settings.lark_bot_enabled is True
@@ -139,3 +147,5 @@ def test_settings_allow_lark_and_llm_overrides():
     assert settings.llm_app_name == "mantle-openrouter"
     assert settings.llm_app_url == "https://example.com/mantle-openrouter"
     assert settings.llm_timeout_seconds == 45
+    assert settings.alert_local_output_enabled is True
+    assert settings.alert_local_output_dir == "/var/tmp/alerts"

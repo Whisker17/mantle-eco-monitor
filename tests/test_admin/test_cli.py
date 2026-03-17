@@ -69,6 +69,26 @@ def test_admin_cli_parses_seed_alert_spike_command():
     assert args.evaluate_rules is True
 
 
+def test_admin_cli_parses_seed_alert_scenario_command():
+    parser = _build_parser()
+
+    args = parser.parse_args(["seed", "alert-scenario", "threshold_up_7d_tvl"])
+
+    assert args.command == "seed"
+    assert args.seed_command == "alert-scenario"
+    assert args.scenario_name == "threshold_up_7d_tvl"
+
+
+def test_admin_cli_parses_seed_alert_scenarios_all_command():
+    parser = _build_parser()
+
+    args = parser.parse_args(["seed", "alert-scenarios", "--all"])
+
+    assert args.command == "seed"
+    assert args.seed_command == "alert-scenarios"
+    assert args.all is True
+
+
 def test_admin_cli_parses_rebuild_data_quality_history_command():
     parser = _build_parser()
 

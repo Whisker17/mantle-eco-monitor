@@ -301,6 +301,12 @@ async def test_core_dune_job_uses_sync_service_runtime(monkeypatch):
         dune_active_addresses_query_id = 0
         dune_chain_transactions_query_id = 0
         dune_stablecoin_volume_query_id = 123
+        lark_app_id = ""
+        lark_app_secret = ""
+        lark_base_url = "https://open.larksuite.com"
+        lark_delivery_enabled = False
+        lark_environment = "dev"
+        alert_local_output_enabled = False
 
     fake_session_factory = object()
     monkeypatch.setattr(
@@ -339,6 +345,11 @@ async def test_daily_summary_job_passes_openrouter_metadata_to_llm_client(monkey
         llm_app_url = "https://github.com/Whisker17/mantle-eco-monitor"
         llm_timeout_seconds = 45
         lark_delivery_enabled = False
+        lark_app_id = ""
+        lark_app_secret = ""
+        lark_base_url = "https://open.larksuite.com"
+        lark_environment = "dev"
+        alert_local_output_enabled = False
 
     fake_session_factory = object()
     monkeypatch.setattr(

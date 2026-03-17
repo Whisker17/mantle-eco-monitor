@@ -19,6 +19,7 @@ htmlcov/
 .coverage
 .tmp/
 .worktrees/
+logs/
 
 *.db
 *.sqlite3
