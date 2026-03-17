@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from src.integrations.lark.cards import (
     build_alert_card,
     build_bot_reply_card,
+    build_consolidated_alert_card,
     build_daily_summary_card,
 )
 
@@ -133,23 +134,276 @@ def test_build_alert_card_compacts_raw_value_for_readability():
     assert text_blocks[5] == "**⏰ Detected:** March 15, 2026 - 09:42 SGT"
 
 
-def test_build_daily_summary_card_includes_metrics_alerts_and_sources():
+def test_build_consolidated_alert_card_single_alert_delegates_to_build_alert_card():
+    alert = {
+        "entity": "mantle",
+        "metric_name": "tvl",
+        "formatted_value": "$1.5B",
+        "time_window": "7d",
+        "change_pct": "0.25",
+        "severity": "high",
+        "trigger_reason": "threshold_25pct_7d",
+        "source_platform": "defillama",
+        "source_ref": "https://defillama.com/chain/Mantle",
+        "detected_at": datetime(2026, 3, 15, 10, 0, tzinfo=UTC).isoformat(),
+        "is_ath": False,
+        "is_milestone": False,
+        "milestone_label": None,
+    }
+    single = build_consolidated_alert_card([alert])
+    direct = build_alert_card(alert)
+    assert single == direct
+
+
+def test_build_consolidated_alert_card_same_metric_multiple_triggers():
+    alerts = [
+        {
+            "entity": "scenario-decline-7d-dau",
+            "metric_name": "daily_active_users",
+            "formatted_value": None,
+            "current_value": "750",
+            "time_window": "7d",
+            "change_pct": "-0.25",
+            "severity": "high",
+            "trigger_reason": "threshold_25pct_7d",
+            "source_platform": "admin_seed",
+            "source_ref": "admin://seed/scenario",
+            "detected_at": datetime(2026, 3, 15, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+        {
+            "entity": "scenario-decline-7d-dau",
+            "metric_name": "daily_active_users",
+            "formatted_value": None,
+            "current_value": "750",
+            "time_window": "7d",
+            "change_pct": "-0.25",
+            "severity": "critical",
+            "trigger_reason": "decline_25pct_7d",
+            "source_platform": "admin_seed",
+            "source_ref": "admin://seed/scenario",
+            "detected_at": datetime(2026, 3, 15, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+        {
+            "entity": "scenario-decline-7d-dau",
+            "metric_name": "multi_signal",
+            "formatted_value": None,
+            "current_value": "750",
+            "time_window": "combined",
+            "change_pct": None,
+            "severity": "critical",
+            "trigger_reason": "multi_signal:daily_active_users",
+            "source_platform": None,
+            "source_ref": None,
+            "detected_at": datetime(2026, 3, 15, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+    ]
+    card = build_consolidated_alert_card(alerts)
+    blocks = _markdown_text_blocks(card)
+
+    assert card["header"]["template"] == "red"
+    assert any("Metric:" in b and "Daily Active Users" in b for b in blocks)
+    assert any("Triggers:" in b for b in blocks)
+    trigger_block = next(b for b in blocks if "Triggers:" in b)
+    assert "decline_25pct_7d" in trigger_block
+    assert "threshold_25pct_7d" in trigger_block
+
+
+def test_build_consolidated_alert_card_same_metric_multi_window_shows_all_movements():
+    alerts = [
+        {
+            "entity": "scenario-threshold-mtd",
+            "metric_name": "active_addresses",
+            "formatted_value": None,
+            "current_value": "120",
+            "time_window": "7d",
+            "change_pct": "0.15",
+            "severity": "moderate",
+            "trigger_reason": "threshold_15pct_7d",
+            "source_platform": "admin_seed",
+            "source_ref": "admin://seed/scenario",
+            "detected_at": datetime(2026, 3, 15, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+        {
+            "entity": "scenario-threshold-mtd",
+            "metric_name": "active_addresses",
+            "formatted_value": None,
+            "current_value": "120",
+            "time_window": "mtd",
+            "change_pct": "0.20",
+            "severity": "high",
+            "trigger_reason": "threshold_20pct_mtd",
+            "source_platform": "admin_seed",
+            "source_ref": "admin://seed/scenario",
+            "detected_at": datetime(2026, 3, 15, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+    ]
+    card = build_consolidated_alert_card(alerts)
+    blocks = _markdown_text_blocks(card)
+
+    metric_block = next(b for b in blocks if "Metric:" in b)
+    assert "Active Addresses" in metric_block
+
+    movement_block = next(b for b in blocks if "Movement:" in b)
+    assert "+15.00% (7D)" in movement_block
+    assert "+20.00% (MTD)" in movement_block
+
+    trigger_block = next(b for b in blocks if "Triggers:" in b)
+    assert "threshold_15pct_7d" in trigger_block
+    assert "threshold_20pct_mtd" in trigger_block
+
+
+def test_build_consolidated_alert_card_multi_metric_shows_signals_detected():
+    alerts = [
+        {
+            "entity": "scenario-multi-signal-core",
+            "metric_name": "tvl",
+            "formatted_value": None,
+            "current_value": "125000000",
+            "time_window": "7d",
+            "change_pct": "0.25",
+            "severity": "high",
+            "trigger_reason": "threshold_25pct_7d",
+            "source_platform": "admin_seed",
+            "source_ref": "admin://seed/scenario",
+            "detected_at": datetime(2026, 3, 15, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+        {
+            "entity": "scenario-multi-signal-core",
+            "metric_name": "dex_volume",
+            "formatted_value": None,
+            "current_value": "135000000",
+            "time_window": "7d",
+            "change_pct": "0.35",
+            "severity": "critical",
+            "trigger_reason": "threshold_35pct_7d",
+            "source_platform": "admin_seed",
+            "source_ref": "admin://seed/scenario",
+            "detected_at": datetime(2026, 3, 15, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+        {
+            "entity": "scenario-multi-signal-core",
+            "metric_name": "multi_signal",
+            "formatted_value": None,
+            "current_value": "125000000",
+            "time_window": "combined",
+            "change_pct": None,
+            "severity": "critical",
+            "trigger_reason": "multi_signal:dex_volume, tvl",
+            "source_platform": None,
+            "source_ref": None,
+            "detected_at": datetime(2026, 3, 15, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+    ]
+    card = build_consolidated_alert_card(alerts)
+    blocks = _markdown_text_blocks(card)
+
+    assert card["header"]["template"] == "green"
+    signals_block = next(b for b in blocks if "Signals Detected" in b)
+    assert "TVL" in signals_block
+    assert "DEX Volume" in signals_block
+    status_block = next(b for b in blocks if "Status:" in b)
+    assert "MULTI-SIGNAL" in status_block
+
+
+def test_build_daily_summary_card_categorises_metrics_and_formats_alerts():
     card = build_daily_summary_card(
         {
             "title": "Mantle Daily Summary",
             "summary_text": "TVL and DEX volume both moved higher.",
             "metrics": [
                 {
+                    "scope": "core",
+                    "entity": "mantle",
                     "metric_name": "tvl",
-                    "formatted_value": "$1.5B",
+                    "value": "731191559",
+                    "formatted_value": "$731.2M",
+                    "source_platform": "defillama",
                     "source_ref": "https://defillama.com/chain/Mantle",
-                }
+                },
+                {
+                    "scope": "core",
+                    "entity": "mantle",
+                    "metric_name": "dex_volume",
+                    "value": "2429889",
+                    "formatted_value": "$2.43M",
+                    "source_platform": "defillama",
+                    "source_ref": "https://defillama.com/chain/Mantle?dexs=true",
+                },
+                {
+                    "scope": "core",
+                    "entity": "mantle",
+                    "metric_name": "stablecoin_mcap",
+                    "value": "770978332",
+                    "formatted_value": "$771M",
+                    "source_platform": "defillama",
+                    "source_ref": "https://defillama.com/chain/Mantle",
+                },
+                {
+                    "scope": "ecosystem",
+                    "entity": "aave-v3",
+                    "metric_name": "tvl",
+                    "value": "490856620",
+                    "formatted_value": "$490.9M",
+                    "source_platform": "defillama",
+                    "source_ref": "https://defillama.com/protocol/aave-v3",
+                },
+                {
+                    "scope": "ecosystem",
+                    "entity": "cian-yield-layer",
+                    "metric_name": "tvl",
+                    "value": "179013806",
+                    "formatted_value": "$179.0M",
+                    "source_platform": "defillama",
+                    "source_ref": "https://defillama.com/protocol/cian-yield-layer",
+                },
             ],
             "alerts": [
                 {
-                    "trigger_reason": "TVL up 25% in 7d",
-                    "source_ref": "https://defillama.com/chain/Mantle",
-                }
+                    "entity": "mantle",
+                    "metric_name": "tvl",
+                    "trigger_reason": "milestone_$1.00B",
+                    "severity": "high",
+                    "change_pct": None,
+                    "time_window": "7d",
+                    "is_ath": False,
+                    "is_milestone": True,
+                    "milestone_label": "$1.00B",
+                },
+                {
+                    "entity": "mantle",
+                    "metric_name": "dex_volume",
+                    "trigger_reason": "decline_27pct_7d",
+                    "severity": "critical",
+                    "change_pct": "-0.275",
+                    "time_window": "7d",
+                    "is_ath": False,
+                    "is_milestone": False,
+                    "milestone_label": None,
+                },
             ],
         }
     )
@@ -157,10 +411,31 @@ def test_build_daily_summary_card_includes_metrics_alerts_and_sources():
     text_blocks = _markdown_text_blocks(card)
 
     assert card["header"]["title"]["content"] == "Mantle Daily Summary"
-    assert all("text" not in element for element in card["elements"] if element["tag"] == "markdown")
-    assert any("TVL and DEX volume both moved higher." in block for block in text_blocks)
-    assert any("tvl" in block and "$1.5B" in block for block in text_blocks)
-    assert any("https://defillama.com/chain/Mantle" in block for block in text_blocks)
+    assert text_blocks[0] == "TVL and DEX volume both moved higher."
+
+    core_block = next(b for b in text_blocks if b.startswith("**Core Metrics**"))
+    assert "TVL (Total Value Locked): $731.2M" in core_block
+    assert "DEX Volume: $2.43M" in core_block
+    assert "(DefiLlama)" in core_block
+
+    stablecoin_block = next(b for b in text_blocks if b.startswith("**Stablecoin**"))
+    assert "Stablecoin Market Cap: $771M" in stablecoin_block
+
+    ecosystem_block = next(b for b in text_blocks if b.startswith("**Ecosystem Protocols**"))
+    assert "Aave V3" in ecosystem_block
+    assert "Cian Yield Layer" in ecosystem_block
+    aave_pos = ecosystem_block.index("Aave V3")
+    cian_pos = ecosystem_block.index("Cian Yield Layer")
+    assert aave_pos < cian_pos, "Ecosystem protocols should be sorted by TVL descending"
+
+    alert_block = next(b for b in text_blocks if b.startswith("**Alerts**"))
+    assert "Mantle / TVL" in alert_block
+    assert "milestone_$1.00B" in alert_block
+    assert "Mantle / DEX Volume" in alert_block
+    assert "-27.50%" in alert_block
+    assert "critical" in alert_block
+
+    assert not any("**Sources**" in b for b in text_blocks)
 
 
 def test_build_bot_reply_card_includes_answer_and_source_urls():

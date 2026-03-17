@@ -247,6 +247,33 @@ async def test_seed_alert_scenario_writes_local_log_when_notification_service_en
     assert "threshold_25pct_7d" in files[0].name
 
 
+async def test_seed_alert_scenario_consolidates_multi_alert_into_single_log(
+    session_factory,
+    tmp_path,
+):
+    local_dir = tmp_path / "logs" / "alerts"
+    notification_service = NotificationService(
+        settings=_make_notification_settings(local_dir),
+        session_factory=session_factory,
+    )
+
+    result = await seed_alert_scenario(
+        session_factory,
+        "decline_7d_dau",
+        notification_service=notification_service,
+    )
+
+    assert result["alerts_created"] == 3
+    files = sorted(local_dir.glob("*.log"))
+    assert len(files) == 1
+    assert "3signals" in files[0].name
+
+    content = files[0].read_text(encoding="utf-8")
+    assert "Triggers:" in content
+    assert "decline_25pct_7d" in content
+    assert "threshold_25pct_7d" in content
+
+
 async def test_seed_alert_scenario_cooldown_repeat_block_suppresses_second_duplicate(session_factory):
     result = await seed_alert_scenario(session_factory, "cooldown_repeat_block")
 

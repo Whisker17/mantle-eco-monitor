@@ -16,7 +16,7 @@ from src.db.repositories import (
     mark_delivery_event_delivered,
     mark_delivery_event_failed,
 )
-from src.integrations.lark.cards import build_alert_card
+from src.integrations.lark.cards import build_alert_card, build_consolidated_alert_card
 from src.integrations.lark.client import LarkClient
 
 logger = logging.getLogger(__name__)
@@ -43,37 +43,41 @@ class NotificationService:
         self._settings = settings
         self._session_factory = session_factory
         self._lark_client = lark_client or LarkClient(
-            app_id=getattr(settings, "lark_app_id", ""),
-            app_secret=getattr(settings, "lark_app_secret", ""),
-            base_url=getattr(settings, "lark_base_url", "https://open.larksuite.com"),
+            app_id=settings.lark_app_id,
+            app_secret=settings.lark_app_secret,
+            base_url=settings.lark_base_url,
         )
 
     async def deliver_alerts(self, alerts: list[AlertEvent]) -> None:
         if not alerts:
             return
 
-        if getattr(self._settings, "lark_delivery_enabled", False):
+        groups = self._group_alerts_by_entity(alerts)
+
+        if self._settings.lark_delivery_enabled:
             chat_id = self._resolve_chat_id("alert")
             if not chat_id:
                 logger.warning("Skipping Lark alert delivery because no chat id is configured")
             else:
-                for alert in alerts:
-                    logical_key = self._logical_key("lark_alert", "alert", alert.id)
+                for entity, group in groups.items():
+                    primary = group[0]
+                    logical_key = self._logical_key("lark_alert", "alert_group", f"{entity}:{primary.id}")
+                    payloads = [self._serialize_alert(a) for a in group]
                     await self._deliver_card(
                         chat_id=chat_id,
                         channel="lark_alert",
                         entity_type="alert",
-                        entity_id=alert.id,
+                        entity_id=primary.id,
                         logical_key=logical_key,
-                        card=build_alert_card(self._serialize_alert(alert)),
+                        card=build_consolidated_alert_card(payloads),
                     )
 
-        if getattr(self._settings, "alert_local_output_enabled", False):
-            for alert in alerts:
-                await self._deliver_local_alert(alert)
+        if self._settings.alert_local_output_enabled:
+            for entity, group in groups.items():
+                await self._deliver_local_alert_group(group)
 
     async def deliver_summary(self, summary_key: str, card: dict) -> None:
-        if not getattr(self._settings, "lark_delivery_enabled", False):
+        if not self._settings.lark_delivery_enabled:
             return
 
         chat_id = self._resolve_chat_id("summary")
@@ -91,15 +95,15 @@ class NotificationService:
         )
 
     def _resolve_chat_id(self, channel: str) -> str:
-        environment = getattr(self._settings, "lark_environment", "dev").lower()
+        environment = self._settings.lark_environment.lower()
         if channel == "alert":
             if environment == "prod":
-                return getattr(self._settings, "lark_alert_chat_id_prod", "")
-            return getattr(self._settings, "lark_alert_chat_id_dev", "")
+                return self._settings.lark_alert_chat_id_prod
+            return self._settings.lark_alert_chat_id_dev
         if channel == "summary":
             if environment == "prod":
-                return getattr(self._settings, "lark_summary_chat_id_prod", "")
-            return getattr(self._settings, "lark_summary_chat_id_dev", "")
+                return self._settings.lark_summary_chat_id_prod
+            return self._settings.lark_summary_chat_id_dev
         raise ValueError(f"Unsupported Lark channel: {channel}")
 
     async def _deliver_card(
@@ -121,7 +125,7 @@ class NotificationService:
                     entity_type=entity_type,
                     entity_id=entity_id,
                     logical_key=logical_key,
-                    environment=getattr(self._settings, "lark_environment", "dev"),
+                    environment=self._settings.lark_environment,
                     status="pending",
                     attempt_count=0,
                     created_at=datetime.now(tz=timezone.utc),
@@ -144,9 +148,17 @@ class NotificationService:
 
             await session.commit()
 
-    async def _deliver_local_alert(self, alert: AlertEvent) -> None:
-        payload = self._serialize_alert(alert)
-        logical_key = self._logical_key("local_alert_log", "alert", alert.id)
+    @staticmethod
+    def _group_alerts_by_entity(alerts: list[AlertEvent]) -> dict[str, list[AlertEvent]]:
+        groups: dict[str, list[AlertEvent]] = {}
+        for alert in alerts:
+            groups.setdefault(alert.entity, []).append(alert)
+        return groups
+
+    async def _deliver_local_alert_group(self, group: list[AlertEvent]) -> None:
+        primary = group[0]
+        logical_key = self._logical_key("local_alert_log", "alert_group", f"{primary.entity}:{primary.id}")
+        payloads = [self._serialize_alert(a) for a in group]
 
         async with self._session_factory() as session:
             delivery = await get_delivery_event_by_logical_key(session, logical_key)
@@ -155,9 +167,9 @@ class NotificationService:
                     session,
                     channel="local_alert_log",
                     entity_type="alert",
-                    entity_id=alert.id,
+                    entity_id=primary.id,
                     logical_key=logical_key,
-                    environment=getattr(self._settings, "lark_environment", "dev"),
+                    environment=self._settings.lark_environment,
                     status="pending",
                     attempt_count=0,
                     created_at=datetime.now(tz=timezone.utc),
@@ -167,14 +179,14 @@ class NotificationService:
                 return
 
             try:
-                path = self._local_alert_path(alert)
+                path = self._local_alert_group_path(group)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(
-                    self._render_local_alert_log(payload),
+                    self._render_local_alert_log(payloads),
                     encoding="utf-8",
                 )
             except Exception as exc:
-                logger.exception("Failed to write local alert log for alert %s", alert.id)
+                logger.exception("Failed to write local alert log for entity %s", primary.entity)
                 await mark_delivery_event_failed(session, delivery, error=str(exc))
             else:
                 await mark_delivery_event_delivered(
@@ -186,20 +198,20 @@ class NotificationService:
             await session.commit()
 
     def _logical_key(self, channel: str, entity_type: str, entity_id: int | str | None) -> str:
-        environment = getattr(self._settings, "lark_environment", "dev")
-        return f"{environment}:{channel}:{entity_type}:{entity_id}"
+        return f"{self._settings.lark_environment}:{channel}:{entity_type}:{entity_id}"
 
-    def _local_alert_path(self, alert: AlertEvent) -> Path:
-        base_dir = Path(getattr(self._settings, "alert_local_output_dir", "logs/alerts"))
+    def _local_alert_group_path(self, group: list[AlertEvent]) -> Path:
+        base_dir = Path(self._settings.alert_local_output_dir)
         if not base_dir.is_absolute():
             base_dir = Path.cwd() / base_dir
 
-        detected_at = alert.detected_at or datetime.now(tz=timezone.utc)
+        primary = group[0]
+        detected_at = primary.detected_at or datetime.now(tz=timezone.utc)
         detected = detected_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        entity = self._sanitize_filename_part(alert.entity)
-        metric = self._sanitize_filename_part(alert.metric_name)
-        reason = self._sanitize_filename_part(alert.trigger_reason)
-        filename = f"{detected}_{entity}_{metric}_{reason}_{alert.id}.log"
+        entity = self._sanitize_filename_part(primary.entity)
+        reasons = [self._sanitize_filename_part(a.trigger_reason) for a in group]
+        reason_part = reasons[0] if len(reasons) == 1 else f"{len(reasons)}signals"
+        filename = f"{detected}_{entity}_{reason_part}_{primary.id}.log"
         return base_dir / filename
 
     def _sanitize_filename_part(self, value: str | None) -> str:
@@ -207,8 +219,10 @@ class NotificationService:
             return "unknown"
         return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_") or "unknown"
 
-    def _render_local_alert_log(self, alert: dict[str, str | bool | None]) -> str:
-        card = build_alert_card(alert)
+    def _render_local_alert_log(self, alerts: list[dict[str, str | bool | None]] | dict[str, str | bool | None]) -> str:
+        if isinstance(alerts, dict):
+            alerts = [alerts]
+        card = build_consolidated_alert_card(alerts)
         blocks = [
             element["content"]
             for element in card.get("elements", [])
@@ -220,10 +234,12 @@ class NotificationService:
     def _normalize_local_block(self, block: str) -> str:
         prefix_map = {
             "📊 Metric:": "Metric:",
+            "📊 Signals Detected:": "Signals Detected:",
             "📈 Movement:": "Movement:",
             "📉 Movement:": "Movement:",
             "💰 Current Value:": "Current Value:",
             "🏆 Status:": "Status:",
+            "🔔 Triggers:": "Triggers:",
             "📡 Source:": "Source:",
             "⏰ Detected:": "Detected:",
             "✍️ Suggested Draft Copy:": "Suggested Draft Copy:",

@@ -145,7 +145,8 @@ That means:
 
 What this means in practice:
 
-- positive scenarios create `alert_events` and local log files
+- positive scenarios create `alert_events` and one consolidated local log file per entity
+- multiple triggers for the same entity are grouped into a single card and log file
 - no-alert scenarios still insert snapshots but do not produce local log files
 - `ath_tvl` remains a documented limitation scenario and does not produce a log because it does not produce an alert on the current real path
 
@@ -318,15 +319,15 @@ Scenario matrix:
 
 | Scenario | Command | Expected Trigger Reasons | Expected Non-Outputs | Notes |
 |---|---|---|---|---|
-| `threshold_up_7d_tvl` | `docker compose exec app python -m src.admin seed alert-scenario threshold_up_7d_tvl` | `['threshold_25pct_7d']` | No `new_ath` on current real path | Positive 7D threshold scenario; 1 local alert log |
-| `decline_7d_dau` | `docker compose exec app python -m src.admin seed alert-scenario decline_7d_dau` | `['decline_25pct_7d', 'multi_signal:daily_active_users', 'threshold_25pct_7d']` | No empty result set | Decline also produces threshold and multi-signal on the current engine path; 3 local alert logs |
-| `threshold_mtd_active_addresses` | `docker compose exec app python -m src.admin seed alert-scenario threshold_mtd_active_addresses` | `['threshold_15pct_7d', 'threshold_20pct_mtd']` | No decline alert | Real path emits both 7D and MTD threshold alerts; 2 local alert logs |
-| `ath_tvl` | `docker compose exec app python -m src.admin seed alert-scenario ath_tvl` | `[]` | No `new_ath` | Current implementation limitation; 0 local alert logs |
-| `milestone_tvl_1b` | `docker compose exec app python -m src.admin seed alert-scenario milestone_tvl_1b` | `['milestone_$1.00B']` | No threshold requirement | Positive milestone scenario; 1 local alert log |
-| `multi_signal_core` | `docker compose exec app python -m src.admin seed alert-scenario multi_signal_core` | `['multi_signal:dex_volume, tvl', 'threshold_25pct_7d', 'threshold_35pct_7d']` | No empty result set | Multi-signal plus its component threshold alerts; 3 local alert logs |
-| `no_alert_low_coverage_7d` | `docker compose exec app python -m src.admin seed alert-scenario no_alert_low_coverage_7d` | `[]` | No threshold or decline alert | Snapshots are written, alert generation is silent; 0 local alert logs |
-| `no_alert_sparse_mtd` | `docker compose exec app python -m src.admin seed alert-scenario no_alert_sparse_mtd` | `[]` | No threshold or decline alert | Sparse month remains silent; 0 local alert logs |
-| `cooldown_repeat_block` | `docker compose exec app python -m src.admin seed alert-scenario cooldown_repeat_block` | First pass `['threshold_25pct_7d']`, second pass `[]` | No duplicate second alert | Cooldown suppression validation; 1 local alert log total |
+| `threshold_up_7d_tvl` | `docker compose exec app python -m src.admin seed alert-scenario threshold_up_7d_tvl` | `['threshold_25pct_7d']` | No `new_ath` on current real path | Positive 7D threshold scenario; 1 consolidated log |
+| `decline_7d_dau` | `docker compose exec app python -m src.admin seed alert-scenario decline_7d_dau` | `['decline_25pct_7d', 'multi_signal:daily_active_users', 'threshold_25pct_7d']` | No empty result set | All triggers consolidated into 1 log per entity |
+| `threshold_mtd_active_addresses` | `docker compose exec app python -m src.admin seed alert-scenario threshold_mtd_active_addresses` | `['threshold_15pct_7d', 'threshold_20pct_mtd']` | No decline alert | Both windows consolidated into 1 log per entity |
+| `ath_tvl` | `docker compose exec app python -m src.admin seed alert-scenario ath_tvl` | `[]` | No `new_ath` | Current implementation limitation; 0 logs |
+| `milestone_tvl_1b` | `docker compose exec app python -m src.admin seed alert-scenario milestone_tvl_1b` | `['milestone_$1.00B']` | No threshold requirement | Positive milestone scenario; 1 consolidated log |
+| `multi_signal_core` | `docker compose exec app python -m src.admin seed alert-scenario multi_signal_core` | `['multi_signal:dex_volume, tvl', 'threshold_25pct_7d', 'threshold_35pct_7d']` | No empty result set | All signals consolidated into 1 log per entity |
+| `no_alert_low_coverage_7d` | `docker compose exec app python -m src.admin seed alert-scenario no_alert_low_coverage_7d` | `[]` | No threshold or decline alert | Snapshots are written, alert generation is silent; 0 logs |
+| `no_alert_sparse_mtd` | `docker compose exec app python -m src.admin seed alert-scenario no_alert_sparse_mtd` | `[]` | No threshold or decline alert | Sparse month remains silent; 0 logs |
+| `cooldown_repeat_block` | `docker compose exec app python -m src.admin seed alert-scenario cooldown_repeat_block` | First pass `['threshold_25pct_7d']`, second pass `[]` | No duplicate second alert | Cooldown suppression; 1 consolidated log total |
 
 ## 8. How To Validate Results
 
@@ -355,8 +356,9 @@ Useful patterns:
 
 When `ALERT_LOCAL_OUTPUT_ENABLED=true` and a scenario creates alerts:
 
-- local log files appear under `logs/alerts/`
+- alerts are consolidated by entity: one log file per entity, regardless of how many triggers fire
 - each file uses the normalized field order shown above
+- multi-trigger files include a `Triggers:` line listing all trigger reasons
 - `Action Required` is always present as the current placeholder block
 
 If a scenario produces no alerts, no local log files are written. This is expected for:

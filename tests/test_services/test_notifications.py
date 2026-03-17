@@ -104,7 +104,7 @@ async def test_notification_service_delivers_alerts_to_environment_chat_and_reco
     assert len(deliveries) == 1
     assert deliveries[0].status == "delivered"
     assert deliveries[0].attempt_count == 1
-    assert deliveries[0].logical_key == f"prod:lark_alert:alert:{alert.id}"
+    assert deliveries[0].logical_key == f"prod:lark_alert:alert_group:{alert.entity}:{alert.id}"
 
 
 @pytest.mark.asyncio
@@ -155,13 +155,13 @@ async def test_notification_service_serializes_alert_fields_needed_for_lark_card
 
     alert = await _insert_alert(session_factory)
     client = FakeLarkClient()
-    captured: dict[str, object] = {}
+    captured_payloads: list[list[dict]] = []
 
-    def fake_build_alert_card(payload: dict):
-        captured.update(payload)
+    def fake_build_consolidated_alert_card(payloads: list[dict]):
+        captured_payloads.append(payloads)
         return {"header": {"title": {"tag": "plain_text", "content": "Alert"}}, "elements": []}
 
-    monkeypatch.setattr(notifications_module, "build_alert_card", fake_build_alert_card)
+    monkeypatch.setattr(notifications_module, "build_consolidated_alert_card", fake_build_consolidated_alert_card)
     service = NotificationService(
         settings=_make_settings(),
         session_factory=session_factory,
@@ -170,12 +170,14 @@ async def test_notification_service_serializes_alert_fields_needed_for_lark_card
 
     await service.deliver_alerts([alert])
 
-    assert captured["change_pct"] == "0.25"
-    assert captured["detected_at"] == "2026-03-15T10:00:00+00:00"
-    assert captured["is_ath"] is True
-    assert captured["is_milestone"] is False
-    assert captured["milestone_label"] is None
-    assert captured["source_platform"] == "defillama"
+    assert len(captured_payloads) == 1
+    payload = captured_payloads[0][0]
+    assert payload["change_pct"] == "0.25"
+    assert payload["detected_at"] == "2026-03-15T10:00:00+00:00"
+    assert payload["is_ath"] is True
+    assert payload["is_milestone"] is False
+    assert payload["milestone_label"] is None
+    assert payload["source_platform"] == "defillama"
 
 
 @pytest.mark.asyncio
@@ -220,7 +222,7 @@ async def test_notification_service_writes_local_alert_log_with_expected_field_o
         deliveries = (await session.execute(select(DeliveryEvent))).scalars().all()
     assert len(deliveries) == 1
     assert deliveries[0].channel == "local_alert_log"
-    assert deliveries[0].logical_key == f"prod:local_alert_log:alert:{alert.id}"
+    assert deliveries[0].logical_key == f"prod:local_alert_log:alert_group:{alert.entity}:{alert.id}"
     assert deliveries[0].status == "delivered"
 
 

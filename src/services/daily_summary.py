@@ -83,7 +83,9 @@ class DailySummaryService:
             [
                 {
                     "role": "system",
-                    "content": "Write a concise Mantle ecosystem daily summary using only the supplied JSON.",
+                    "content": "Write a concise Mantle ecosystem daily summary using only the supplied JSON. "
+                        "Focus on narrative insights and trends. Do not list raw metric values "
+                        "or repeat individual numbers — those are shown separately in the card.",
                 },
                 {
                     "role": "user",

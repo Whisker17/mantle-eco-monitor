@@ -279,25 +279,218 @@ def build_alert_card(alert: dict) -> dict:
     )
 
 
+def build_consolidated_alert_card(alerts: list[dict]) -> dict:
+    if len(alerts) == 1:
+        return build_alert_card(alerts[0])
+
+    metric_alerts = [a for a in alerts if a.get("metric_name") != "multi_signal"]
+    if not metric_alerts:
+        metric_alerts = alerts
+
+    by_metric: dict[str, dict] = {}
+    for alert in metric_alerts:
+        key = alert["metric_name"]
+        if key not in by_metric:
+            by_metric[key] = alert
+
+    primary = metric_alerts[0]
+    has_downward = any(_is_downward(a) for a in metric_alerts)
+    primary_for_header = next((a for a in metric_alerts if _is_downward(a)), primary) if has_downward else primary
+
+    blocks: list[str] = []
+
+    if len(by_metric) == 1:
+        rep = list(by_metric.values())[0]
+        movement_icon = "📉" if _is_downward(rep) else "📈"
+        blocks.append(f"**📊 Metric:** {_humanize_metric_name(rep['metric_name'])}")
+
+        unique_windows = {a.get("time_window") for a in metric_alerts}
+        if len(unique_windows) > 1:
+            movements = [_format_movement(a) for a in metric_alerts]
+            blocks.append(f"**{movement_icon} Movement:** " + " / ".join(movements))
+        else:
+            blocks.append(f"**{movement_icon} Movement:** {_format_movement(rep)}")
+
+        blocks.append(f"**💰 Current Value:** {_format_current_value(rep)}")
+        blocks.append(f"**🏆 Status:** {_derive_status(rep)}")
+    else:
+        signal_lines = []
+        for alert in by_metric.values():
+            name = _humanize_metric_name(alert["metric_name"])
+            movement = _format_movement(alert)
+            value = _format_current_value(alert)
+            signal_lines.append(f"▸ **{name}:** {movement} → {value}")
+        blocks.append("**📊 Signals Detected:**\n" + "\n".join(signal_lines))
+        blocks.append(f"**🏆 Status:** {_derive_consolidated_status(alerts)}")
+
+    reasons = sorted({a.get("trigger_reason", "") for a in alerts if a.get("trigger_reason")})
+    blocks.append("**🔔 Triggers:** " + ", ".join(reasons))
+
+    blocks.append(f"**📡 Source:** {_format_source(primary)}")
+    blocks.append(f"**⏰ Detected:** {_format_detected(primary.get('detected_at'))}")
+    blocks.append("**✍️ Suggested Draft Copy:** Placeholder - draft copy not generated yet.")
+    blocks.append(ACTION_REQUIRED_PLACEHOLDER)
+
+    return _base_card(
+        f"{_title_prefix(primary_for_header)} MANTLE METRICS ALERT",
+        blocks,
+        template=_header_template(primary_for_header),
+    )
+
+
+def _derive_consolidated_status(alerts: list[dict]) -> str:
+    has_multi = any(
+        (a.get("trigger_reason") or "").startswith("multi_signal") for a in alerts
+    )
+    if has_multi:
+        return "MULTI-SIGNAL ALERT"
+    if any(a.get("is_ath") for a in alerts):
+        return "NEW ALL-TIME HIGH"
+    if any(a.get("is_milestone") for a in alerts):
+        labels = [a.get("milestone_label") for a in alerts if a.get("milestone_label")]
+        if labels:
+            return f"MILESTONE REACHED: {labels[0]}"
+        return "MILESTONE REACHED"
+    if any(_is_downward(a) for a in alerts):
+        return "SHARP DECLINE"
+    if any(_is_upward(a) for a in alerts):
+        return "SIGNIFICANT UPWARD MOVE"
+    return "MONITORED ALERT"
+
+
+def _categorize_summary_metrics(
+    metrics: list[dict],
+) -> dict[str, list[dict]]:
+    core: list[dict] = []
+    stablecoin: list[dict] = []
+    ecosystem: list[dict] = []
+    for metric in metrics:
+        scope = metric.get("scope", "")
+        name = metric.get("metric_name", "")
+        if scope == "ecosystem":
+            ecosystem.append(metric)
+        elif name.startswith("stablecoin_"):
+            stablecoin.append(metric)
+        else:
+            core.append(metric)
+    return {"core": core, "stablecoin": stablecoin, "ecosystem": ecosystem}
+
+
+def _summary_metric_value(metric: dict) -> str:
+    if metric.get("formatted_value"):
+        return str(metric["formatted_value"])
+    raw = _parse_decimal(metric.get("value"))
+    if raw is None:
+        return str(metric.get("value", ""))
+    return _compact_number(raw, currency=_is_currency_metric(metric.get("metric_name", "")))
+
+
+def _summary_source_label(metric: dict) -> str:
+    platform = (metric.get("source_platform") or "").lower()
+    return SOURCE_LABELS.get(platform) or _guess_source_label(metric.get("source_ref")) or ""
+
+
+def _humanize_entity(entity: str) -> str:
+    return " ".join(
+        word.upper() if word.lower() in {"tvl", "tvs", "dex", "mnt", "v3", "v2"} else word.capitalize()
+        for word in entity.replace("-", " ").replace("_", " ").split()
+    )
+
+
+def _render_core_or_stablecoin_block(title: str, metrics: list[dict]) -> str:
+    lines = [f"**{title}**"]
+    for metric in metrics:
+        label = _humanize_metric_name(metric["metric_name"])
+        value = _summary_metric_value(metric)
+        source = _summary_source_label(metric)
+        source_part = f"  ({source})" if source else ""
+        lines.append(f"- {label}: {value}{source_part}")
+    return "\n".join(lines)
+
+
+def _render_ecosystem_block(metrics: list[dict]) -> str:
+    by_entity: dict[str, list[dict]] = {}
+    for metric in metrics:
+        by_entity.setdefault(metric.get("entity", "unknown"), []).append(metric)
+
+    entity_entries: list[tuple[Decimal, str, str]] = []
+    for entity, group in by_entity.items():
+        tvl_metric = next((m for m in group if m.get("metric_name") == "tvl"), None)
+        sort_value = _parse_decimal((tvl_metric or group[0]).get("value")) or Decimal("0")
+
+        parts: list[str] = []
+        tvl_first = sorted(group, key=lambda m: (0 if m.get("metric_name") == "tvl" else 1, m.get("metric_name", "")))
+        for m in tvl_first:
+            parts.append(f"{_humanize_metric_name(m['metric_name'])}: {_summary_metric_value(m)}")
+
+        source = _summary_source_label(group[0])
+        source_part = f"  ({source})" if source else ""
+        line = f"- {_humanize_entity(entity)}: {', '.join(parts)}{source_part}"
+        entity_entries.append((sort_value, entity, line))
+
+    entity_entries.sort(key=lambda e: e[0], reverse=True)
+
+    lines = ["**Ecosystem Protocols**"]
+    lines.extend(line for _, _, line in entity_entries)
+    return "\n".join(lines)
+
+
+def _format_summary_alerts(alerts: list[dict]) -> str:
+    real_alerts = [a for a in alerts if not (a.get("trigger_reason") or "").startswith("multi_signal")]
+    multi_signals = [a for a in alerts if (a.get("trigger_reason") or "").startswith("multi_signal")]
+
+    by_key: dict[tuple[str, str], list[dict]] = {}
+    for alert in real_alerts:
+        key = (alert.get("entity", ""), alert.get("metric_name", ""))
+        by_key.setdefault(key, []).append(alert)
+
+    lines = ["**Alerts**"]
+    for (entity, metric_name), group in by_key.items():
+        entity_label = _humanize_entity(entity) if entity else "Unknown"
+        metric_label = _humanize_metric_name(metric_name)
+        parts: list[str] = []
+        for a in group:
+            change_pct = _parse_decimal(a.get("change_pct"))
+            window = _format_window(a.get("time_window"))
+            severity = a.get("severity", "")
+            reason = a.get("trigger_reason", "")
+
+            if a.get("is_milestone"):
+                parts.append(f"{reason} ({severity})")
+            elif a.get("is_ath"):
+                parts.append(f"new ATH ({severity})")
+            elif change_pct is not None:
+                pct = change_pct * Decimal("100")
+                sign = "+" if pct > 0 else ""
+                parts.append(f"{sign}{pct.quantize(Decimal('0.01'))}% ({window}), {severity}")
+            else:
+                parts.append(f"{reason} ({severity})")
+
+        lines.append(f"- {entity_label} / {metric_label}: {' | '.join(parts)}")
+
+    if multi_signals:
+        reasons = sorted({a.get("trigger_reason", "") for a in multi_signals})
+        lines.append(f"- Multi-signal: {', '.join(reasons)}")
+
+    return "\n".join(lines)
+
+
 def build_daily_summary_card(summary: dict) -> dict:
     blocks = [summary["summary_text"]]
-    if summary.get("metrics"):
-        metric_lines = [
-            f"- {metric['metric_name']}: {metric.get('formatted_value') or metric.get('value', '')}"
-            for metric in summary["metrics"]
-        ]
-        blocks.append("**Metrics**\n" + "\n".join(metric_lines))
-    if summary.get("alerts"):
-        alert_lines = [f"- {alert['trigger_reason']}" for alert in summary["alerts"]]
-        blocks.append("**Alerts**\n" + "\n".join(alert_lines))
 
-    source_urls = [
-        entry["source_ref"]
-        for entry in [*(summary.get("metrics") or []), *(summary.get("alerts") or [])]
-        if entry.get("source_ref")
-    ]
-    if source_urls:
-        blocks.append("**Sources**\n" + "\n".join(f"- {url}" for url in source_urls))
+    metrics = summary.get("metrics") or []
+    if metrics:
+        categories = _categorize_summary_metrics(metrics)
+        if categories["core"]:
+            blocks.append(_render_core_or_stablecoin_block("Core Metrics", categories["core"]))
+        if categories["stablecoin"]:
+            blocks.append(_render_core_or_stablecoin_block("Stablecoin", categories["stablecoin"]))
+        if categories["ecosystem"]:
+            blocks.append(_render_ecosystem_block(categories["ecosystem"]))
+
+    alerts = summary.get("alerts") or []
+    if alerts:
+        blocks.append(_format_summary_alerts(alerts))
 
     return _base_card(summary["title"], blocks)
 
