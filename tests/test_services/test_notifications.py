@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -175,3 +176,74 @@ async def test_notification_service_serializes_alert_fields_needed_for_lark_card
     assert captured["is_milestone"] is False
     assert captured["milestone_label"] is None
     assert captured["source_platform"] == "defillama"
+
+
+@pytest.mark.asyncio
+async def test_notification_service_writes_local_alert_log_with_expected_field_order(
+    session_factory,
+    tmp_path,
+):
+    alert = await _insert_alert(session_factory)
+    local_dir = tmp_path / "logs" / "alerts"
+    service = NotificationService(
+        settings=_make_settings(
+            lark_delivery_enabled=False,
+            alert_local_output_enabled=True,
+            alert_local_output_dir=str(local_dir),
+        ),
+        session_factory=session_factory,
+        lark_client=FakeLarkClient(),
+    )
+
+    await service.deliver_alerts([alert])
+
+    files = sorted(local_dir.glob("*.log"))
+    assert len(files) == 1
+    content = files[0].read_text(encoding="utf-8")
+
+    expected_order = [
+        "Metric:",
+        "Movement:",
+        "Current Value:",
+        "Status:",
+        "Source:",
+        "Detected:",
+        "Suggested Draft Copy:",
+        "Action Required:",
+    ]
+    positions = [content.index(label) for label in expected_order]
+    assert positions == sorted(positions)
+    assert "Metric: TVL (Total Value Locked)" in content
+    assert "Status: NEW ALL-TIME HIGH" in content
+
+    async with session_factory() as session:
+        deliveries = (await session.execute(select(DeliveryEvent))).scalars().all()
+    assert len(deliveries) == 1
+    assert deliveries[0].channel == "local_alert_log"
+    assert deliveries[0].status == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_notification_service_writes_local_logs_without_lark_calls_when_lark_disabled(
+    session_factory,
+    tmp_path,
+):
+    alert = await _insert_alert(session_factory)
+    local_dir = tmp_path / "logs" / "alerts"
+    client = FakeLarkClient()
+    service = NotificationService(
+        settings=_make_settings(
+            lark_delivery_enabled=False,
+            alert_local_output_enabled=True,
+            alert_local_output_dir=str(local_dir),
+        ),
+        session_factory=session_factory,
+        lark_client=client,
+    )
+
+    await service.deliver_alerts([alert])
+
+    assert client.calls == []
+    files = sorted(local_dir.glob("*.log"))
+    assert len(files) == 1
+    assert Path(files[0]).exists()
