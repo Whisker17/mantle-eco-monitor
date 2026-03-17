@@ -113,8 +113,7 @@ async def test_seed_alert_scenario_creates_expected_threshold_alerts(session_fac
     assert result["scenario"] == "threshold_up_7d_tvl"
     assert result["snapshots_inserted"] == 8
     assert result["alerts_created"] >= 1
-    assert "threshold_25pct_7d" in result["expected_trigger_reasons"]
-    assert "threshold_25pct_7d" in result["actual_trigger_reasons"]
+    assert result["expected_trigger_reasons"] == result["actual_trigger_reasons"]
 
 
 async def test_seed_alert_scenario_keeps_low_coverage_series_silent(session_factory):
@@ -140,6 +139,27 @@ async def test_seed_alert_scenario_ath_tvl_reflects_current_real_path_limitation
     assert result["expected_trigger_reasons"] == []
     assert result["actual_trigger_reasons"] == []
     assert "does not emit new_ath" in result["limitation"]
+
+
+async def test_seed_alert_scenario_decline_7d_dau_matches_real_trigger_set(session_factory):
+    result = await seed_alert_scenario(session_factory, "decline_7d_dau")
+
+    assert result["scenario"] == "decline_7d_dau"
+    assert result["expected_trigger_reasons"] == result["actual_trigger_reasons"]
+
+
+async def test_seed_alert_scenario_threshold_mtd_active_addresses_matches_real_trigger_set(session_factory):
+    result = await seed_alert_scenario(session_factory, "threshold_mtd_active_addresses")
+
+    assert result["scenario"] == "threshold_mtd_active_addresses"
+    assert result["expected_trigger_reasons"] == result["actual_trigger_reasons"]
+
+
+async def test_seed_alert_scenario_multi_signal_core_matches_real_trigger_set(session_factory):
+    result = await seed_alert_scenario(session_factory, "multi_signal_core")
+
+    assert result["scenario"] == "multi_signal_core"
+    assert result["expected_trigger_reasons"] == result["actual_trigger_reasons"]
 
 
 async def test_seed_alert_scenario_cooldown_repeat_block_suppresses_second_duplicate(session_factory):

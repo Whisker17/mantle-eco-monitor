@@ -163,7 +163,11 @@ def _scenario_decline_7d_dau() -> dict[str, Any]:
     return {
         "scenario": "decline_7d_dau",
         "records": records,
-        "expected_trigger_reasons": ["decline_25pct_7d"],
+        "expected_trigger_reasons": [
+            "decline_25pct_7d",
+            "multi_signal:daily_active_users",
+            "threshold_25pct_7d",
+        ],
     }
 
 
@@ -183,7 +187,7 @@ def _scenario_threshold_mtd_active_addresses() -> dict[str, Any]:
     return {
         "scenario": "threshold_mtd_active_addresses",
         "records": records,
-        "expected_trigger_reasons": ["threshold_20pct_mtd"],
+        "expected_trigger_reasons": ["threshold_15pct_7d", "threshold_20pct_mtd"],
     }
 
 
@@ -239,7 +243,11 @@ def _scenario_multi_signal_core() -> dict[str, Any]:
     return {
         "scenario": "multi_signal_core",
         "records": records,
-        "expected_trigger_reasons": ["multi_signal:dex_volume, tvl"],
+        "expected_trigger_reasons": [
+            "multi_signal:dex_volume, tvl",
+            "threshold_25pct_7d",
+            "threshold_35pct_7d",
+        ],
     }
 
 
