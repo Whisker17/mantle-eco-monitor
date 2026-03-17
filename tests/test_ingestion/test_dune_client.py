@@ -1,4 +1,5 @@
 from decimal import Decimal
+from pathlib import Path
 
 import httpx
 import pytest
@@ -202,6 +203,14 @@ def test_dune_metric_query_map_keeps_only_uncovered_metrics():
         "chain_transactions": "dune_chain_transactions_query_id",
         "stablecoin_transfer_volume": "dune_stablecoin_volume_query_id",
     }
+
+
+def test_stablecoin_transfer_volume_query_uses_parameterized_date_window():
+    sql = Path("queries/dune/stablecoin_transfer_volume.sql").read_text(encoding="utf-8")
+
+    assert "{{start_date}}" in sql
+    assert "{{end_date}}" in sql
+    assert "date_trunc('day', now()) - interval '30' day" not in sql
 
 
 @pytest.mark.asyncio
