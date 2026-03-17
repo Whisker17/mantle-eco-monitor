@@ -7,8 +7,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.db.models import AlertEvent
-from src.db.repositories import insert_alert, insert_snapshots
+from src.db.repositories import insert_snapshots
 from src.ingestion.base import MetricRecord
 from src.rules.engine import RuleEngine
 
@@ -78,81 +77,53 @@ async def _insert_records_and_evaluate_in_session(
 async def _cooldown_repeat_block_result(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> dict[str, Any]:
+    import src.rules.cooldown as cooldown_module
+
     entity = "scenario-cooldown-repeat-block"
-    async with session_factory() as session:
-        first_records = [
-            _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 8, 0, 0, tzinfo=UTC)),
-            _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 9, 0, 0, tzinfo=UTC)),
-            _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 10, 0, 0, tzinfo=UTC)),
-            _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 11, 0, 0, tzinfo=UTC)),
-            _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 12, 0, 0, tzinfo=UTC)),
-            _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 13, 0, 0, tzinfo=UTC)),
-            _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 14, 0, 0, tzinfo=UTC)),
-            _make_record(entity=entity, metric_name="tvl", value="125000000", collected_at=datetime(2026, 3, 15, 0, 0, tzinfo=UTC)),
-        ]
-        first_inserted = await insert_snapshots(session, first_records)
-        first_latest = [snapshot for snapshot in first_inserted if snapshot.collected_at == datetime(2026, 3, 15, 0, 0, tzinfo=UTC)]
-        first_candidates = await RuleEngine(session).evaluate(first_latest)
-        now = datetime.now(tz=UTC)
-        first_alerts: list[AlertEvent] = []
-        for candidate in first_candidates:
-            first_alerts.append(
-                await insert_alert(
-                    session,
-                    scope=candidate.scope,
-                    entity=candidate.entity,
-                    metric_name=candidate.metric_name,
-                    current_value=candidate.current_value,
-                    previous_value=candidate.previous_value,
-                    formatted_value=candidate.formatted_value,
-                    time_window=candidate.time_window,
-                    change_pct=candidate.change_pct,
-                    severity=candidate.severity,
-                    trigger_reason=candidate.trigger_reason,
-                    source_platform=candidate.source_platform,
-                    source_ref=candidate.source_ref,
-                    detected_at=now,
-                    is_ath=candidate.is_ath,
-                    is_milestone=candidate.is_milestone,
-                    milestone_label=candidate.milestone_label,
-                    cooldown_until=candidate.cooldown_until,
-                    reviewed=False,
-                    ai_eligible=False,
-                    created_at=now,
-                )
-            )
-        first_alerts_created = len(first_alerts)
+    first_records = [
+        _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 8, 0, 0, tzinfo=UTC)),
+        _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 9, 0, 0, tzinfo=UTC)),
+        _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 10, 0, 0, tzinfo=UTC)),
+        _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 11, 0, 0, tzinfo=UTC)),
+        _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 12, 0, 0, tzinfo=UTC)),
+        _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 13, 0, 0, tzinfo=UTC)),
+        _make_record(entity=entity, metric_name="tvl", value="100000000", collected_at=datetime(2026, 3, 14, 0, 0, tzinfo=UTC)),
+        _make_record(entity=entity, metric_name="tvl", value="125000000", collected_at=datetime(2026, 3, 15, 0, 0, tzinfo=UTC)),
+    ]
+    second_records = [
+        _make_record(entity=entity, metric_name="tvl", value="125000000", collected_at=datetime(2026, 3, 16, 0, 0, tzinfo=UTC)),
+    ]
 
-        second_records = [
-            _make_record(entity=entity, metric_name="tvl", value="125000000", collected_at=datetime(2026, 3, 16, 0, 0, tzinfo=UTC)),
-        ]
-        second_inserted = await insert_snapshots(session, second_records)
-        second_candidates = await RuleEngine(session)._check_thresholds(second_inserted[0])
-        second_candidates = [
-            candidate
-            for candidate in second_candidates
-            if not any(
-                alert.metric_name == candidate.metric_name
-                and alert.trigger_reason == candidate.trigger_reason
-                and alert.cooldown_until is not None
-                and alert.cooldown_until > now
-                for alert in first_alerts
-            )
-        ]
-        second_alerts_created = 0
+    original_get_last_alert = cooldown_module._get_last_alert
 
-        await session.commit()
+    async def _normalized_get_last_alert(session: AsyncSession, entity: str, metric_name: str, trigger_reason: str):
+        alert = await original_get_last_alert(session, entity, metric_name, trigger_reason)
+        if alert is None:
+            return None
+        if alert.detected_at is not None and alert.detected_at.tzinfo is None:
+            alert.detected_at = alert.detected_at.replace(tzinfo=UTC)
+        if alert.cooldown_until is not None and alert.cooldown_until.tzinfo is None:
+            alert.cooldown_until = alert.cooldown_until.replace(tzinfo=UTC)
+        return alert
+
+    # SQLite drops tzinfo on persisted datetimes; normalize on read so the real cooldown path can compare safely.
+    cooldown_module._get_last_alert = _normalized_get_last_alert
+    try:
+        first = await _insert_records_and_evaluate(session_factory, first_records)
+        second = await _insert_records_and_evaluate(session_factory, second_records)
+    finally:
+        cooldown_module._get_last_alert = original_get_last_alert
 
     return {
         "scenario": "cooldown_repeat_block",
-        "snapshots_inserted": len(first_inserted) + len(second_inserted),
-        "alerts_created": first_alerts_created + second_alerts_created,
+        "snapshots_inserted": first["snapshots_inserted"] + second["snapshots_inserted"],
+        "alerts_created": first["alerts_created"] + second["alerts_created"],
         "expected_trigger_reasons": ["threshold_25pct_7d"],
-        "actual_trigger_reasons": _actual_trigger_reasons(first_candidates) + _actual_trigger_reasons(second_candidates),
-        "first_alerts_created": first_alerts_created,
-        "second_alerts_created": second_alerts_created,
-        "first_trigger_reasons": _actual_trigger_reasons(first_candidates),
-        "second_trigger_reasons": _actual_trigger_reasons(second_candidates),
+        "actual_trigger_reasons": first["actual_trigger_reasons"] + second["actual_trigger_reasons"],
+        "first_alerts_created": first["alerts_created"],
+        "second_alerts_created": second["alerts_created"],
+        "first_trigger_reasons": first["actual_trigger_reasons"],
+        "second_trigger_reasons": second["actual_trigger_reasons"],
     }
 
 
