@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     dune_sync_chunk_days: int = 31
     ai_enrichment_enabled: bool = False
     lark_delivery_enabled: bool = False
+    alert_local_output_enabled: bool = False
+    alert_local_output_dir: str = "logs/alerts"
     lark_bot_enabled: bool = False
     bot_external_actions_enabled: bool = False
     lark_app_id: str = ""
