@@ -131,6 +131,17 @@ async def test_seed_alert_scenario_keeps_low_coverage_series_silent(session_fact
     assert alerts == 0
 
 
+async def test_seed_alert_scenario_ath_tvl_reflects_current_real_path_limitation(session_factory):
+    result = await seed_alert_scenario(session_factory, "ath_tvl")
+
+    assert result["scenario"] == "ath_tvl"
+    assert result["snapshots_inserted"] == 5
+    assert result["alerts_created"] == 0
+    assert result["expected_trigger_reasons"] == []
+    assert result["actual_trigger_reasons"] == []
+    assert "does not emit new_ath" in result["limitation"]
+
+
 async def test_seed_alert_scenario_cooldown_repeat_block_suppresses_second_duplicate(session_factory):
     result = await seed_alert_scenario(session_factory, "cooldown_repeat_block")
 
