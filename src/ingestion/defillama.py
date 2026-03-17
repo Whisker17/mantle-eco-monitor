@@ -27,19 +27,32 @@ class DefiLlamaCollector(BaseCollector):
     STABLES_BASE = "https://stablecoins.llama.fi"
     PROTOCOL_PATH = "/protocol"
 
-    def __init__(self, http_client: httpx.AsyncClient | None = None):
+    METRIC_GROUPS = frozenset({"tvl", "stablecoin", "dex"})
+
+    def __init__(
+        self,
+        http_client: httpx.AsyncClient | None = None,
+        metrics: list[str] | None = None,
+    ):
         self._http = http_client or httpx.AsyncClient(timeout=30.0)
+        self._metrics = metrics
 
     @property
     def source_platform(self) -> str:
         return "defillama"
 
+    def _should_collect(self, group: str) -> bool:
+        return self._metrics is None or group in self._metrics
+
     async def collect(self) -> list[MetricRecord]:
         records: list[MetricRecord] = []
-        records.extend(await self._collect_chain_tvl())
-        records.extend(await self._collect_stablecoin_supply())
-        records.extend(await self._collect_stablecoin_mcap())
-        records.extend(await self._collect_chain_dex_volume())
+        if self._should_collect("tvl"):
+            records.extend(await self._collect_chain_tvl())
+        if self._should_collect("stablecoin"):
+            records.extend(await self._collect_stablecoin_supply())
+            records.extend(await self._collect_stablecoin_mcap())
+        if self._should_collect("dex"):
+            records.extend(await self._collect_chain_dex_volume())
         return records
 
     async def _collect_chain_tvl(self) -> list[MetricRecord]:

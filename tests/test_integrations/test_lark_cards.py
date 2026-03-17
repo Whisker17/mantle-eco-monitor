@@ -545,6 +545,135 @@ def test_build_consolidated_alert_card_ecosystem_multi_signal_shows_entity():
     assert "MULTI-SIGNAL" in status_block
 
 
+def test_build_consolidated_alert_card_lone_multi_signal_skipped_for_real_alert():
+    """When multi_signal is the only alert, it should not render garbage like 'Metric: Multi Signal'."""
+    alerts = [
+        {
+            "scope": "ecosystem",
+            "entity": "fluxion-network",
+            "display_name": "Fluxion Network",
+            "category": "dex",
+            "metric_name": "multi_signal",
+            "formatted_value": None,
+            "current_value": "577700",
+            "time_window": "combined",
+            "change_pct": None,
+            "severity": "critical",
+            "trigger_reason": "multi_signal:tvl",
+            "source_platform": None,
+            "source_ref": None,
+            "detected_at": datetime(2026, 3, 17, 10, 30, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+        {
+            "scope": "ecosystem",
+            "entity": "fluxion-network",
+            "display_name": "Fluxion Network",
+            "category": "dex",
+            "metric_name": "volume",
+            "formatted_value": None,
+            "current_value": "1500000",
+            "time_window": "7d",
+            "change_pct": "0.3032",
+            "severity": "high",
+            "trigger_reason": "threshold_30pct_7d",
+            "source_platform": "defillama",
+            "source_ref": "https://defillama.com/protocol/fluxion-network",
+            "detected_at": datetime(2026, 3, 17, 10, 30, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        },
+    ]
+    card = build_consolidated_alert_card(alerts)
+    blocks = _markdown_text_blocks(card)
+
+    assert "Multi Signal" not in card["header"]["title"]["content"]
+    metric_block = next(b for b in blocks if "Metric:" in b)
+    assert "Volume" in metric_block
+    assert "Multi Signal" not in metric_block
+    source_block = next(b for b in blocks if "Source:" in b)
+    assert "Unknown" not in source_block
+
+
+def test_build_alert_card_source_fallback_url_when_source_ref_is_none():
+    card = build_alert_card(
+        {
+            "entity": "mantle",
+            "metric_name": "chain_transactions",
+            "formatted_value": "1.2M",
+            "time_window": "7d",
+            "change_pct": "0.15",
+            "severity": "moderate",
+            "trigger_reason": "threshold_15pct_7d",
+            "source_platform": "growthepie",
+            "source_ref": None,
+            "detected_at": datetime(2026, 3, 17, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        }
+    )
+
+    text_blocks = _markdown_text_blocks(card)
+    source_block = next(b for b in text_blocks if "Source:" in b)
+    assert "growthepie" in source_block
+    assert "https://www.growthepie.xyz/chains/mantle" in source_block
+
+
+def test_build_alert_card_source_fallback_url_dune():
+    card = build_alert_card(
+        {
+            "entity": "mantle",
+            "metric_name": "active_addresses",
+            "formatted_value": None,
+            "current_value": "50000",
+            "time_window": "7d",
+            "change_pct": "0.10",
+            "severity": "moderate",
+            "trigger_reason": "threshold_10pct_7d",
+            "source_platform": "dune",
+            "source_ref": None,
+            "detected_at": datetime(2026, 3, 17, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        }
+    )
+
+    text_blocks = _markdown_text_blocks(card)
+    source_block = next(b for b in text_blocks if "Source:" in b)
+    assert "Dune" in source_block
+    assert "https://dune.com" in source_block
+
+
+def test_build_alert_card_source_explicit_ref_takes_precedence_over_fallback():
+    card = build_alert_card(
+        {
+            "entity": "mantle",
+            "metric_name": "active_addresses",
+            "formatted_value": None,
+            "current_value": "50000",
+            "time_window": "7d",
+            "change_pct": "0.10",
+            "severity": "moderate",
+            "trigger_reason": "threshold_10pct_7d",
+            "source_platform": "dune",
+            "source_ref": "https://dune.com/queries/42",
+            "detected_at": datetime(2026, 3, 17, 10, 0, tzinfo=UTC).isoformat(),
+            "is_ath": False,
+            "is_milestone": False,
+            "milestone_label": None,
+        }
+    )
+
+    text_blocks = _markdown_text_blocks(card)
+    source_block = next(b for b in text_blocks if "Source:" in b)
+    assert "Dune (https://dune.com/queries/42)" in source_block
+
+
 def test_build_alert_card_ecosystem_without_display_name_falls_back():
     card = build_alert_card(
         {

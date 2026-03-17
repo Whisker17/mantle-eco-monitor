@@ -44,12 +44,23 @@ def _get_notification_service(settings: Settings, session_factory):
     return NotificationService(settings=settings, session_factory=session_factory)
 
 
+async def core_defillama_tvl_job():
+    logger.info("Running core_defillama_tvl collection (hourly)")
+    settings, session_factory = _get_runtime_dependencies()
+    return await run_collection_job(
+        "core_defillama_tvl",
+        DefiLlamaCollector(metrics=["tvl"]),
+        session_factory,
+        notification_service=_get_notification_service(settings, session_factory),
+    )
+
+
 async def core_defillama_job():
-    logger.info("Running core_defillama collection")
+    logger.info("Running core_defillama collection (stablecoin + dex)")
     settings, session_factory = _get_runtime_dependencies()
     return await run_collection_job(
         "core_defillama",
-        DefiLlamaCollector(),
+        DefiLlamaCollector(metrics=["stablecoin", "dex"]),
         session_factory,
         notification_service=_get_notification_service(settings, session_factory),
     )
@@ -172,6 +183,7 @@ async def source_health_job():
 
 
 JOB_REGISTRY = {
+    "core_defillama_tvl": core_defillama_tvl_job,
     "core_defillama": core_defillama_job,
     "core_growthepie": core_growthepie_job,
     "core_dune": core_dune_job,

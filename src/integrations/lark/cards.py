@@ -35,6 +35,14 @@ SOURCE_LABELS = {
     "dune": "Dune",
 }
 
+SOURCE_FALLBACK_URLS = {
+    "defillama": "https://defillama.com/chain/Mantle",
+    "l2beat": "https://l2beat.com/scaling/projects/mantle",
+    "growthepie": "https://www.growthepie.xyz/chains/mantle",
+    "coingecko": "https://www.coingecko.com/en/coins/mantle",
+    "dune": "https://dune.com",
+}
+
 CATEGORY_LABELS = {
     "dex": "DEX",
     "lending": "Lending",
@@ -189,6 +197,9 @@ def _format_source(alert: dict) -> str:
     source_label = SOURCE_LABELS.get(source_platform) or _guess_source_label(alert.get("source_ref"))
     source_ref = alert.get("source_ref")
 
+    if not source_ref and source_platform:
+        source_ref = SOURCE_FALLBACK_URLS.get(source_platform)
+
     if source_label and source_ref:
         return f"{source_label} ({source_ref})"
     if source_label:
@@ -323,12 +334,12 @@ def build_alert_card(alert: dict) -> dict:
 
 
 def build_consolidated_alert_card(alerts: list[dict]) -> dict:
-    if len(alerts) == 1:
-        return build_alert_card(alerts[0])
-
     metric_alerts = [a for a in alerts if a.get("metric_name") != "multi_signal"]
     if not metric_alerts:
         metric_alerts = alerts
+
+    if len(metric_alerts) == 1:
+        return build_alert_card(metric_alerts[0])
 
     by_metric: dict[str, dict] = {}
     for alert in metric_alerts:
