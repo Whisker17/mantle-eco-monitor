@@ -220,6 +220,7 @@ async def test_notification_service_writes_local_alert_log_with_expected_field_o
         deliveries = (await session.execute(select(DeliveryEvent))).scalars().all()
     assert len(deliveries) == 1
     assert deliveries[0].channel == "local_alert_log"
+    assert deliveries[0].logical_key == f"prod:local_alert_log:alert:{alert.id}"
     assert deliveries[0].status == "delivered"
 
 
