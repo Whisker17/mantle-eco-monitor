@@ -3,51 +3,46 @@ active_profile = "prod"
 [profiles.prod]
 timezone = "Asia/Shanghai"
 
-# --- T1: Hourly — real-time ATH / milestone detection within 1 hour ---
-
-[profiles.prod.jobs.core_defillama_tvl]
-mode = "cron"
-hour = "*"
-minute = 0
-
-# --- T2: Every 4 hours — near-real-time metrics ---
-
-[profiles.prod.jobs.core_defillama]
-mode = "cron"
-hour = "0,4,8,12,16,20"
-minute = 5
+# --- T1: Every 6h — sub-daily upstream sources ---
 
 [profiles.prod.jobs.core_l2beat]
 mode = "cron"
-hour = "1,5,9,13,17,21"
-minute = 20
+hour = "0,6,12,18"
+minute = 0
 
 [profiles.prod.jobs.core_coingecko]
 mode = "cron"
-hour = "2,6,10,14,18,22"
-minute = 40
+hour = "3,9,15,21"
+minute = 15
 
-# --- T3: Twice daily — daily-aggregate metrics ---
+# --- T2: Every 8h — daily upstream, timely ATH detection ---
+
+[profiles.prod.jobs.core_defillama]
+mode = "cron"
+hour = "2,10,18"
+minute = 30
+
+# --- T3: Once daily — daily-aggregate metrics ---
 
 [profiles.prod.jobs.core_growthepie]
 mode = "cron"
-hour = "10,18"
-minute = 10
+hour = 10
+minute = 0
 
 [profiles.prod.jobs.core_dune]
 mode = "cron"
-hour = "10,18"
-minute = 30
+hour = 10
+minute = 20
 
 [profiles.prod.jobs.eco_aave]
 mode = "cron"
-hour = "10,18"
-minute = 50
+hour = 11
+minute = 0
 
 [profiles.prod.jobs.eco_protocols]
 mode = "cron"
-hour = "11,19"
-minute = 0
+hour = 11
+minute = 20
 
 # --- T4: Daily — operational tasks ---
 
@@ -72,10 +67,6 @@ minute = 45
 
 [profiles.dev_live]
 timezone = "Asia/Shanghai"
-
-[profiles.dev_live.jobs.core_defillama_tvl]
-mode = "interval"
-minutes = 3
 
 [profiles.dev_live.jobs.core_defillama]
 mode = "interval"
@@ -116,9 +107,6 @@ minutes = 2
 [profiles.ci]
 scheduler_enabled = false
 timezone = "Asia/Shanghai"
-
-[profiles.ci.jobs.core_defillama_tvl]
-mode = "disabled"
 
 [profiles.ci.jobs.core_defillama]
 mode = "disabled"

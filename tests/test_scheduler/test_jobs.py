@@ -18,7 +18,6 @@ def test_build_scheduler_registers_prod_cron_jobs():
     schedule_ids = {s.id for s in schedules}
 
     assert schedule_ids == {
-        "core_defillama_tvl",
         "core_defillama",
         "core_growthepie",
         "core_dune",
@@ -32,7 +31,6 @@ def test_build_scheduler_registers_prod_cron_jobs():
     }
 
     schedule_by_id = {schedule.id: schedule for schedule in schedules}
-    assert isinstance(schedule_by_id["core_defillama_tvl"].trigger, CronTrigger)
     assert isinstance(schedule_by_id["core_defillama"].trigger, CronTrigger)
     assert isinstance(schedule_by_id["source_health"].trigger, CronTrigger)
 
@@ -47,7 +45,6 @@ def test_build_scheduler_registers_interval_jobs_and_skips_manual_jobs():
     schedule_ids = {s.id for s in schedules}
 
     assert schedule_ids == {
-        "core_defillama_tvl",
         "core_defillama",
         "core_l2beat",
         "core_coingecko",
@@ -55,7 +52,6 @@ def test_build_scheduler_registers_interval_jobs_and_skips_manual_jobs():
     }
 
     schedule_by_id = {schedule.id: schedule for schedule in schedules}
-    assert isinstance(schedule_by_id["core_defillama_tvl"].trigger, IntervalTrigger)
     assert isinstance(schedule_by_id["core_defillama"].trigger, IntervalTrigger)
     assert isinstance(schedule_by_id["core_l2beat"].trigger, IntervalTrigger)
     assert isinstance(schedule_by_id["core_coingecko"].trigger, IntervalTrigger)
@@ -274,7 +270,6 @@ def test_scheduler_cli_list_prints_job_modes(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert result == 0
     assert "Active profile: dev_live" in captured.out
-    assert "core_defillama_tvl: interval" in captured.out
     assert "core_defillama: interval" in captured.out
     assert "core_coingecko: interval" in captured.out
 
