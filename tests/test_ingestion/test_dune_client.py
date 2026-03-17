@@ -235,7 +235,11 @@ async def test_dune_client_executes_parameterized_query_and_fetches_result():
 
     assert rows == [{"day": "2026-03-01", "value": 1}]
     assert seen_requests == [
-        ("POST", "/api/v1/query/42/execute", '{"query_parameters":{"start_date":"2026-03-01","end_date":"2026-03-05"},"performance":"medium"}'),
+        (
+            "POST",
+            "/api/v1/query/42/execute",
+            '{"query_parameters":{"start_date":"2026-03-01 00:00:00","end_date":"2026-03-05 00:00:00"},"performance":"medium"}',
+        ),
         ("GET", "/api/v1/execution/exec-42/status", None),
         ("GET", "/api/v1/execution/exec-42/results", None),
     ]

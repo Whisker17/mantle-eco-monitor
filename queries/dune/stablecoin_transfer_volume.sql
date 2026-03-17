@@ -1,6 +1,3 @@
--- Daily stablecoin transfer volume on Mantle
--- Restrict to the current top 6 stablecoins shown on DefiLlama's Mantle page.
--- Use explicit contract addresses to avoid mixing in unrelated same-symbol tokens.
 with stablecoins as (
   select 0x201eba5cc46d216ce6dc03f6a759e8e766e956ae as contract_address, 'USDT' as symbol, 6 as decimals
   union all
@@ -17,13 +14,16 @@ with stablecoins as (
 select
   date_trunc('day', t.evt_block_time) as day,
   s.symbol,
+  cast(t.contract_address as varchar) as contract_address,
   sum(cast(t.value as double) / pow(10, s.decimals)) as volume,
-  count(distinct t.evt_tx_hash) as tx_count
+  count(distinct t.evt_tx_hash) as tx_count,
+  count(*) as transfer_count
 from erc20_mantle.evt_Transfer t
-inner join stablecoins s on t.contract_address = s.contract_address
-where t.evt_block_time >= cast('{{start_date}}' as timestamp)
-  and t.evt_block_time < cast('{{end_date}}' as timestamp) + interval '1' day
+join stablecoins s
+  on t.contract_address = s.contract_address
+where t.evt_block_time >= date_trunc('day', now()) - interval '30' day
+  and t.evt_block_time < date_trunc('day', now())
   and t."from" != 0x0000000000000000000000000000000000000000
   and t."to" != 0x0000000000000000000000000000000000000000
-group by 1, 2
-order by 1 asc, volume desc
+group by 1, 2, 3
+order by 1 desc, volume desc;

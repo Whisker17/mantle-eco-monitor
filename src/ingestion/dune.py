@@ -85,10 +85,11 @@ class DuneClient:
 
     async def _execute_query(self, query_id: int, *, params: dict[str, str]) -> str:
         http = await self._get_http()
+        normalized_params = self._normalize_query_parameters(params)
         resp = await http.post(
             f"{self.BASE_URL}/query/{query_id}/execute",
             json={
-                "query_parameters": params,
+                "query_parameters": normalized_params,
                 "performance": "medium",
             },
         )
@@ -98,6 +99,20 @@ class DuneClient:
         if not execution_id:
             raise RuntimeError(f"Dune query {query_id} did not return an execution_id")
         return str(execution_id)
+
+    def _normalize_query_parameters(self, params: dict[str, str]) -> dict[str, str]:
+        normalized: dict[str, str] = {}
+        for key, value in params.items():
+            normalized[key] = self._normalize_query_parameter_value(value)
+        return normalized
+
+    @staticmethod
+    def _normalize_query_parameter_value(value: str) -> str:
+        try:
+            parsed_date = date.fromisoformat(value)
+        except ValueError:
+            return value
+        return f"{parsed_date.isoformat()} 00:00:00"
 
     async def _wait_for_execution(self, execution_id: str) -> None:
         http = await self._get_http()
