@@ -1,17 +1,39 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from sqlalchemy import func, select
 
+from config.settings import Settings
 from src.admin.rebuild import (
     DATA_QUALITY_HISTORY_TARGETS,
     REBUILD_JOB_ORDER,
     rebuild_data_quality_history,
 )
-from src.admin.seed import seed_alert_scenario, seed_alert_spike
+from src.admin.seed import seed_alert_scenario, seed_alert_scenarios, seed_alert_spike
 from src.db.models import AlertEvent, MetricSnapshot
 from src.scheduler.runtime import JobResult
+from src.services.notifications import NotificationService
+
+
+class FakeNotificationService:
+    def __init__(self):
+        self.calls: list[list[AlertEvent]] = []
+
+    async def deliver_alerts(self, alerts):
+        self.calls.append(list(alerts))
+
+
+def _make_notification_settings(local_dir: Path) -> Settings:
+    return Settings(
+        _env_file=None,
+        database_url="sqlite+aiosqlite:///ignored.db",
+        lark_delivery_enabled=False,
+        alert_local_output_enabled=True,
+        alert_local_output_dir=str(local_dir),
+        lark_environment="prod",
+    )
 
 
 async def test_seed_alert_spike_inserts_snapshots_and_alerts(session_factory):
@@ -160,6 +182,69 @@ async def test_seed_alert_scenario_multi_signal_core_matches_real_trigger_set(se
 
     assert result["scenario"] == "multi_signal_core"
     assert result["expected_trigger_reasons"] == result["actual_trigger_reasons"]
+
+
+async def test_seed_alert_scenario_delivers_created_alerts_to_notification_service(session_factory):
+    notification_service = FakeNotificationService()
+
+    result = await seed_alert_scenario(
+        session_factory,
+        "threshold_up_7d_tvl",
+        notification_service=notification_service,
+    )
+
+    assert result["alerts_created"] == 1
+    assert len(notification_service.calls) == 1
+    assert [alert.trigger_reason for alert in notification_service.calls[0]] == result["actual_trigger_reasons"]
+
+
+async def test_seed_alert_scenario_skips_notification_delivery_when_no_alerts(session_factory):
+    notification_service = FakeNotificationService()
+
+    result = await seed_alert_scenario(
+        session_factory,
+        "no_alert_low_coverage_7d",
+        notification_service=notification_service,
+    )
+
+    assert result["alerts_created"] == 0
+    assert notification_service.calls == []
+
+
+async def test_seed_alert_scenarios_batch_delivers_created_alerts_only_for_positive_scenarios(session_factory):
+    notification_service = FakeNotificationService()
+
+    result = await seed_alert_scenarios(
+        session_factory,
+        ["threshold_up_7d_tvl", "no_alert_low_coverage_7d"],
+        notification_service=notification_service,
+    )
+
+    assert result["total_alerts_created"] == 1
+    assert len(notification_service.calls) == 1
+    assert [alert.trigger_reason for alert in notification_service.calls[0]] == ["threshold_25pct_7d"]
+
+
+async def test_seed_alert_scenario_writes_local_log_when_notification_service_enabled(
+    session_factory,
+    tmp_path,
+):
+    local_dir = tmp_path / "logs" / "alerts"
+    notification_service = NotificationService(
+        settings=_make_notification_settings(local_dir),
+        session_factory=session_factory,
+    )
+
+    result = await seed_alert_scenario(
+        session_factory,
+        "threshold_up_7d_tvl",
+        notification_service=notification_service,
+    )
+
+    assert result["alerts_created"] == 1
+    files = sorted(local_dir.glob("*.log"))
+    assert len(files) == 1
+    assert "threshold_25pct_7d" in files[0].name
 
 
 async def test_seed_alert_scenario_cooldown_repeat_block_suppresses_second_duplicate(session_factory):

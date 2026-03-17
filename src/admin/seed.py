@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from src.db.models import AlertEvent
 from src.db.repositories import insert_alert, insert_snapshots
 from src.ingestion.base import MetricRecord
 from src.rules.engine import RuleEngine
@@ -59,23 +60,25 @@ async def _insert_records_and_evaluate_in_session(
 ) -> dict[str, Any]:
     inserted = await insert_snapshots(session, records)
     candidates = []
-    alerts_created = 0
+    alerts: list[AlertEvent] = []
     if inserted:
         latest_at = max(snapshot.collected_at for snapshot in inserted)
         latest = [snapshot for snapshot in inserted if snapshot.collected_at == latest_at]
         candidates = await RuleEngine(session).evaluate(latest)
-        alerts_created = await _persist_alerts(session, candidates)
+        alerts = await _persist_alerts(session, candidates)
     await session.commit()
 
     return {
         "snapshots_inserted": len(inserted),
-        "alerts_created": alerts_created,
+        "alerts_created": len(alerts),
+        "alerts": alerts,
         "actual_trigger_reasons": _actual_trigger_reasons(candidates),
     }
 
 
 async def _cooldown_repeat_block_result(
     session_factory: async_sessionmaker[AsyncSession],
+    notification_service=None,
 ) -> dict[str, Any]:
     import src.rules.cooldown as cooldown_module
 
@@ -111,6 +114,8 @@ async def _cooldown_repeat_block_result(
     try:
         first = await _insert_records_and_evaluate(session_factory, first_records)
         second = await _insert_records_and_evaluate(session_factory, second_records)
+        await _deliver_alerts_if_needed(notification_service, first["alerts"])
+        await _deliver_alerts_if_needed(notification_service, second["alerts"])
     finally:
         cooldown_module._get_last_alert = original_get_last_alert
 
@@ -295,35 +300,42 @@ SCENARIO_BUILDERS: dict[str, Callable[[], dict[str, Any]]] = {
 ALERT_SCENARIO_NAMES = tuple(SCENARIO_BUILDERS.keys()) + ("cooldown_repeat_block",)
 
 
-async def _persist_alerts(session: AsyncSession, candidates) -> int:
+async def _persist_alerts(session: AsyncSession, candidates) -> list[AlertEvent]:
     now = datetime.now(tz=UTC)
-    count = 0
+    alerts: list[AlertEvent] = []
     for candidate in candidates:
-        await insert_alert(
-            session,
-            scope=candidate.scope,
-            entity=candidate.entity,
-            metric_name=candidate.metric_name,
-            current_value=candidate.current_value,
-            previous_value=candidate.previous_value,
-            formatted_value=candidate.formatted_value,
-            time_window=candidate.time_window,
-            change_pct=candidate.change_pct,
-            severity=candidate.severity,
-            trigger_reason=candidate.trigger_reason,
-            source_platform=candidate.source_platform,
-            source_ref=candidate.source_ref,
-            detected_at=now,
-            is_ath=candidate.is_ath,
-            is_milestone=candidate.is_milestone,
-            milestone_label=candidate.milestone_label,
-            cooldown_until=candidate.cooldown_until,
-            reviewed=False,
-            ai_eligible=False,
-            created_at=now,
+        alerts.append(
+            await insert_alert(
+                session,
+                scope=candidate.scope,
+                entity=candidate.entity,
+                metric_name=candidate.metric_name,
+                current_value=candidate.current_value,
+                previous_value=candidate.previous_value,
+                formatted_value=candidate.formatted_value,
+                time_window=candidate.time_window,
+                change_pct=candidate.change_pct,
+                severity=candidate.severity,
+                trigger_reason=candidate.trigger_reason,
+                source_platform=candidate.source_platform,
+                source_ref=candidate.source_ref,
+                detected_at=now,
+                is_ath=candidate.is_ath,
+                is_milestone=candidate.is_milestone,
+                milestone_label=candidate.milestone_label,
+                cooldown_until=candidate.cooldown_until,
+                reviewed=False,
+                ai_eligible=False,
+                created_at=now,
+            )
         )
-        count += 1
-    return count
+    return alerts
+
+
+async def _deliver_alerts_if_needed(notification_service, alerts: list[AlertEvent]) -> None:
+    if notification_service is None or not alerts:
+        return
+    await notification_service.deliver_alerts(alerts)
 
 
 async def seed_alert_spike(
@@ -367,7 +379,7 @@ async def seed_alert_spike(
         if evaluate_rules and inserted:
             latest = max(inserted, key=lambda snapshot: snapshot.collected_at)
             candidates = await RuleEngine(session).evaluate([latest])
-            alerts_created = await _persist_alerts(session, candidates)
+            alerts_created = len(await _persist_alerts(session, candidates))
         await session.commit()
 
     return {
@@ -381,9 +393,13 @@ async def seed_alert_spike(
 async def seed_alert_scenario(
     session_factory: async_sessionmaker[AsyncSession],
     scenario_name: str,
+    notification_service=None,
 ) -> dict[str, Any]:
     if scenario_name == "cooldown_repeat_block":
-        return await _cooldown_repeat_block_result(session_factory)
+        return await _cooldown_repeat_block_result(
+            session_factory,
+            notification_service=notification_service,
+        )
 
     builder = SCENARIO_BUILDERS.get(scenario_name)
     if builder is None:
@@ -391,6 +407,7 @@ async def seed_alert_scenario(
 
     scenario = builder()
     result = await _insert_records_and_evaluate(session_factory, scenario["records"])
+    await _deliver_alerts_if_needed(notification_service, result["alerts"])
     return {
         "scenario": scenario_name,
         "snapshots_inserted": result["snapshots_inserted"],
@@ -404,8 +421,16 @@ async def seed_alert_scenario(
 async def seed_alert_scenarios(
     session_factory: async_sessionmaker[AsyncSession],
     scenario_names: list[str],
+    notification_service=None,
 ) -> dict[str, Any]:
-    results = [await seed_alert_scenario(session_factory, scenario_name) for scenario_name in scenario_names]
+    results = [
+        await seed_alert_scenario(
+            session_factory,
+            scenario_name,
+            notification_service=notification_service,
+        )
+        for scenario_name in scenario_names
+    ]
     return {
         "scenarios": results,
         "total_snapshots_inserted": sum(int(result["snapshots_inserted"]) for result in results),

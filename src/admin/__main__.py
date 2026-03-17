@@ -10,6 +10,7 @@ from src.admin.rebuild import rebuild_data_quality_history
 from src.admin.runtime import run_handler
 from src.admin.runtime import build_admin_session_factory, load_settings
 from src.admin.seed import ALERT_SCENARIO_NAMES, seed_alert_scenario, seed_alert_scenarios, seed_alert_spike
+from src.services.notifications import NotificationService
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -121,6 +122,10 @@ def main(argv: list[str] | None = None) -> int:
         elif command_args.command == "seed":
             settings = load_settings()
             session_factory = build_admin_session_factory(settings)
+            notification_service = NotificationService(
+                settings=settings,
+                session_factory=session_factory,
+            )
             if command_args.seed_command == "alert-spike":
                 result = await seed_alert_spike(
                     session_factory,
@@ -131,14 +136,22 @@ def main(argv: list[str] | None = None) -> int:
                     evaluate_rules=command_args.evaluate_rules,
                 )
             elif command_args.seed_command == "alert-scenario":
-                result = await seed_alert_scenario(session_factory, command_args.scenario_name)
+                result = await seed_alert_scenario(
+                    session_factory,
+                    command_args.scenario_name,
+                    notification_service=notification_service,
+                )
             elif command_args.seed_command == "alert-scenarios":
                 if not command_args.all and not command_args.only:
                     raise SystemExit("Use --all or --only for alert-scenarios")
                 scenario_names = list(ALERT_SCENARIO_NAMES) if command_args.all else [
                     name.strip() for name in command_args.only.split(",") if name.strip()
                 ]
-                result = await seed_alert_scenarios(session_factory, scenario_names)
+                result = await seed_alert_scenarios(
+                    session_factory,
+                    scenario_names,
+                    notification_service=notification_service,
+                )
             else:
                 raise SystemExit(f"Unknown seed command: {command_args.seed_command}")
         elif command_args.command == "rebuild":

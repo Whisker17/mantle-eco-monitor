@@ -133,28 +133,27 @@ Action Required:
 - Target post window: Within 6 hours of alert
 ```
 
-## 4. Important Current Limitation
+## 4. Scenario Delivery Behavior
 
-The deterministic seed scenarios do not currently write local log files by themselves.
+The deterministic seed scenarios now deliver created alerts through `NotificationService`.
 
-Reason:
+That means:
 
 - `python -m src.admin seed alert-scenario ...` persists snapshots and `alert_events`
-- local file output is produced by `NotificationService.deliver_alerts()`
-- the admin seed commands do not call `NotificationService.deliver_alerts()`
+- any created alerts are then passed to `NotificationService.deliver_alerts()`
+- with `ALERT_LOCAL_OUTPUT_ENABLED=true`, matching local log files are written under `logs/alerts/`
 
-What the seed scenarios are good for today:
+What this means in practice:
 
-- validating rule triggers
-- validating `alert_events`
-- validating expected trigger sets returned by the scenario JSON
-- validating snapshot coverage behavior
+- positive scenarios create `alert_events` and local log files
+- no-alert scenarios still insert snapshots but do not produce local log files
+- `ath_tvl` remains a documented limitation scenario and does not produce a log because it does not produce an alert on the current real path
 
-What the seed scenarios do not do today:
+Use the scenario JSON, `inspect` commands, and local log files together:
 
-- they do not replay those seeded alerts into `logs/alerts/`
-
-Use the seed scenarios to validate alert generation and inspect the database. Use runtime collection paths that call `NotificationService` if you need end-to-end local file delivery.
+- scenario JSON tells you the expected and actual trigger set
+- `inspect alerts` confirms persisted `alert_events`
+- `logs/alerts/` lets you manually review rendered local output
 
 ## 5. Rule Reference
 
@@ -203,6 +202,12 @@ Current implementation reality:
 - as a result, `ath_tvl` is documented as a current limitation scenario, not as a positive ATH trigger scenario
 
 This is a real current limitation, not an omitted test.
+
+Current impact on local testing:
+
+- `ath_tvl` is included in the scenario catalog so the limitation stays visible
+- it is not a positive alert-output scenario
+- no local log file should be produced for `ath_tvl`
 
 ### Milestone
 
@@ -307,19 +312,21 @@ Run selected scenarios:
 docker compose exec app python -m src.admin seed alert-scenarios --only threshold_up_7d_tvl,multi_signal_core
 ```
 
+With `ALERT_LOCAL_OUTPUT_ENABLED=true`, the positive scenarios below also write local log files under `logs/alerts/`.
+
 Scenario matrix:
 
 | Scenario | Command | Expected Trigger Reasons | Expected Non-Outputs | Notes |
 |---|---|---|---|---|
-| `threshold_up_7d_tvl` | `docker compose exec app python -m src.admin seed alert-scenario threshold_up_7d_tvl` | `['threshold_25pct_7d']` | No `new_ath` on current real path | Positive 7D threshold scenario |
-| `decline_7d_dau` | `docker compose exec app python -m src.admin seed alert-scenario decline_7d_dau` | `['decline_25pct_7d', 'multi_signal:daily_active_users', 'threshold_25pct_7d']` | No empty result set | Decline also produces threshold and multi-signal on the current engine path |
-| `threshold_mtd_active_addresses` | `docker compose exec app python -m src.admin seed alert-scenario threshold_mtd_active_addresses` | `['threshold_15pct_7d', 'threshold_20pct_mtd']` | No decline alert | Real path emits both 7D and MTD threshold alerts |
-| `ath_tvl` | `docker compose exec app python -m src.admin seed alert-scenario ath_tvl` | `[]` | No `new_ath` | Current implementation limitation |
-| `milestone_tvl_1b` | `docker compose exec app python -m src.admin seed alert-scenario milestone_tvl_1b` | `['milestone_$1.00B']` | No threshold requirement | Positive milestone scenario |
-| `multi_signal_core` | `docker compose exec app python -m src.admin seed alert-scenario multi_signal_core` | `['multi_signal:dex_volume, tvl', 'threshold_25pct_7d', 'threshold_35pct_7d']` | No empty result set | Multi-signal plus its component threshold alerts |
-| `no_alert_low_coverage_7d` | `docker compose exec app python -m src.admin seed alert-scenario no_alert_low_coverage_7d` | `[]` | No threshold or decline alert | Snapshots are written, alert generation is silent |
-| `no_alert_sparse_mtd` | `docker compose exec app python -m src.admin seed alert-scenario no_alert_sparse_mtd` | `[]` | No threshold or decline alert | Sparse month remains silent |
-| `cooldown_repeat_block` | `docker compose exec app python -m src.admin seed alert-scenario cooldown_repeat_block` | First pass `['threshold_25pct_7d']`, second pass `[]` | No duplicate second alert | Cooldown suppression validation |
+| `threshold_up_7d_tvl` | `docker compose exec app python -m src.admin seed alert-scenario threshold_up_7d_tvl` | `['threshold_25pct_7d']` | No `new_ath` on current real path | Positive 7D threshold scenario; 1 local alert log |
+| `decline_7d_dau` | `docker compose exec app python -m src.admin seed alert-scenario decline_7d_dau` | `['decline_25pct_7d', 'multi_signal:daily_active_users', 'threshold_25pct_7d']` | No empty result set | Decline also produces threshold and multi-signal on the current engine path; 3 local alert logs |
+| `threshold_mtd_active_addresses` | `docker compose exec app python -m src.admin seed alert-scenario threshold_mtd_active_addresses` | `['threshold_15pct_7d', 'threshold_20pct_mtd']` | No decline alert | Real path emits both 7D and MTD threshold alerts; 2 local alert logs |
+| `ath_tvl` | `docker compose exec app python -m src.admin seed alert-scenario ath_tvl` | `[]` | No `new_ath` | Current implementation limitation; 0 local alert logs |
+| `milestone_tvl_1b` | `docker compose exec app python -m src.admin seed alert-scenario milestone_tvl_1b` | `['milestone_$1.00B']` | No threshold requirement | Positive milestone scenario; 1 local alert log |
+| `multi_signal_core` | `docker compose exec app python -m src.admin seed alert-scenario multi_signal_core` | `['multi_signal:dex_volume, tvl', 'threshold_25pct_7d', 'threshold_35pct_7d']` | No empty result set | Multi-signal plus its component threshold alerts; 3 local alert logs |
+| `no_alert_low_coverage_7d` | `docker compose exec app python -m src.admin seed alert-scenario no_alert_low_coverage_7d` | `[]` | No threshold or decline alert | Snapshots are written, alert generation is silent; 0 local alert logs |
+| `no_alert_sparse_mtd` | `docker compose exec app python -m src.admin seed alert-scenario no_alert_sparse_mtd` | `[]` | No threshold or decline alert | Sparse month remains silent; 0 local alert logs |
+| `cooldown_repeat_block` | `docker compose exec app python -m src.admin seed alert-scenario cooldown_repeat_block` | First pass `['threshold_25pct_7d']`, second pass `[]` | No duplicate second alert | Cooldown suppression validation; 1 local alert log total |
 
 ## 8. How To Validate Results
 
@@ -346,16 +353,18 @@ Useful patterns:
 
 ## 9. Local Log Expectations
 
-Current reality:
+When `ALERT_LOCAL_OUTPUT_ENABLED=true` and a scenario creates alerts:
 
-- `seed alert-scenario` and `seed alert-scenarios` do not directly write files under `logs/alerts/`
-- if you run those commands and no new local alert logs appear, that is expected with the current implementation
-
-What should still be true when local logs are produced through runtime delivery paths:
-
-- logs appear under `logs/alerts/`
+- local log files appear under `logs/alerts/`
 - each file uses the normalized field order shown above
 - `Action Required` is always present as the current placeholder block
+
+If a scenario produces no alerts, no local log files are written. This is expected for:
+
+- `ath_tvl`
+- `no_alert_low_coverage_7d`
+- `no_alert_sparse_mtd`
+- the second pass inside `cooldown_repeat_block`
 
 ## 10. Practical Caveats
 
